@@ -107,7 +107,7 @@ class Token:
         if pos_start:
             self.pos_start = pos_start.copy()
             self.pos_end =pos_start.copy()
-            self.pos_end.next_character()
+            
 
         if pos_end:
             self.pos_end = pos_end
@@ -116,9 +116,6 @@ class Token:
         if self.value: return f'{self.type}:{self.value}'
         return f'{self.type}'
 
-    def __repr__(self):
-        if self.value: return f'{self.type}:{self.value}'
-        return f'{self.type}'
 
 # LEXER
 
@@ -135,43 +132,38 @@ class Lexer:
         self.character_current = self.text[self.pos.idx] if self.pos.idx < len(self.text) else None
 
     def make_identifier_or_keyword(self):
-            identifier_str = ''
-            while self.character_current and (self.character_current in LETTERS or self.character_current in DIGITS):
-                identifier_str += self.character_current
-                self.next_character()
-            if identifier_str == 'display':
-                return Token(TOKTYPE_DISPLAY)
-            elif identifier_str == 'when':
-                return Token(TOKTYPE_WHEN)
-            elif identifier_str == 'otherwise':
-                return Token(TOKTYPE_OTHERWISE)
-            elif identifier_str == 'repeat':
-                return Token(TOKTYPE_REPEAT)
-            elif identifier_str == 'create':
-                return Token(TOKTYPE_CREATE)
-            elif identifier_str == 'give':
-                return Token(TOKTYPE_GIVE)
-            elif identifier_str == 'ask':
-                return Token(TOKTYPE_ASK)
-            elif identifier_str == 'start':
-                return Token(TOKTYPE_START)
-            elif identifier_str == 'end':
-                return Token(TOKTYPE_END)
-            elif identifier_str == 'set':     
-                return Token(TOKTYPE_SET)
-            elif identifier_str == 'to':      
-                return Token(TOKTYPE_TO)
-            else:
-                return Token(TOKTYPE_IDENTIFIER, identifier_str)
+        pos_start = self.pos.copy()
+        identifier_str = ''
+        while self.character_current and (self.character_current in LETTERS or self.character_current in DIGITS):
+            identifier_str += self.character_current
+            self.next_character()
+
+        token_type = {
+            'display': TOKTYPE_DISPLAY,
+            'when': TOKTYPE_WHEN,
+            'otherwise': TOKTYPE_OTHERWISE,
+            'repeat': TOKTYPE_REPEAT,
+            'create': TOKTYPE_CREATE,
+            'give': TOKTYPE_GIVE,
+            'ask': TOKTYPE_ASK,
+            'start': TOKTYPE_START,
+            'end': TOKTYPE_END,
+            'set': TOKTYPE_SET,
+            'to': TOKTYPE_TO,
+        }.get(identifier_str, TOKTYPE_IDENTIFIER)
+
+        return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
+
 
     def make_string(self):
+        pos_start = self.pos.copy()
         string_value = ''
         self.next_character()  
         while self.character_current != '"':
             string_value += self.character_current
             self.next_character()
-        self.next_character()  
-        return Token(TOKTYPE_STRING, string_value)
+        self.next_character() 
+        return Token(TOKTYPE_STRING, string_value, pos_start, self.pos.copy())
 
     def make_tokens(self):
         tokens = []
@@ -187,56 +179,69 @@ class Lexer:
                 while self.character_current and self.character_current != '\n':
                     self.next_character()
             elif self.character_current == '+':
-                tokens.append(Token(TOKTYPE_PLUS))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_PLUS, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '-':
-                tokens.append(Token(TOKTYPE_MINUS))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_MINUS, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '*':
-                tokens.append(Token(TOKTYPE_MUL))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_MUL, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '/':
-                tokens.append(Token(TOKTYPE_DIV))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_DIV, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '=':
+                pos_start = self.pos.copy()
                 self.next_character()
                 if self.character_current == '=':
-                    tokens.append(Token(TOKTYPE_EQ))
                     self.next_character()
+                    tokens.append(Token(TOKTYPE_EQ, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
-                    tokens.append(Token(TOKTYPE_EQUALS))
+                    tokens.append(Token(TOKTYPE_EQUALS, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '(':
-                tokens.append(Token(TOKTYPE_LPAREN))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_LPAREN, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == ')':
-                tokens.append(Token(TOKTYPE_RPAREN))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_RPAREN, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '<':
+                pos_start = self.pos.copy()
                 self.next_character()
                 if self.character_current == '=':
-                    tokens.append(Token(TOKTYPE_LTE))
                     self.next_character()
+                    tokens.append(Token(TOKTYPE_LTE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
-                    tokens.append(Token(TOKTYPE_LT))
+                    tokens.append(Token(TOKTYPE_LT, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '>':
+                pos_start = self.pos.copy()
                 self.next_character()
                 if self.character_current == '=':
-                    tokens.append(Token(TOKTYPE_GTE))
                     self.next_character()
+                    tokens.append(Token(TOKTYPE_GTE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
-                    tokens.append(Token(TOKTYPE_GT))
+                    tokens.append(Token(TOKTYPE_GT, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '[':
-                tokens.append(Token(TOKTYPE_LBRACKET))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_LBRACKET, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == ']':
-                tokens.append(Token(TOKTYPE_RBRACKET))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_RBRACKET, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == ':':
-                tokens.append(Token(TOKTYPE_COLON))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_COLON, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == ',':
-                tokens.append(Token(TOKTYPE_COMMA))
+                pos_start = self.pos.copy()
                 self.next_character()
+                tokens.append(Token(TOKTYPE_COMMA, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '"':
                 tokens.append(self.make_string())
             else:
@@ -248,36 +253,49 @@ class Lexer:
         return tokens, None
     
     def make_number(self):
+        pos_start = self.pos.copy()
         num_str = ''
-        while self.character_current and self.character_current in DIGITS:
+        dot_count = 0
+
+        while self.character_current and (self.character_current in DIGITS or self.character_current == '.'):
+            if self.character_current == '.':
+                if dot_count == 1: 
+                    break
+                dot_count += 1
             num_str += self.character_current
             self.next_character()
-        return Token(TOKTYPE_NUMBER, int(num_str))
+
+        if dot_count == 0: 
+            return Token(TOKTYPE_NUMBER, int(num_str), pos_start, self.pos.copy())
+        else: 
+            return Token(TOKTYPE_NUMBER, float(num_str), pos_start, self.pos.copy())
+
+
         
 #NODES
 
 class NodeNumber:
     def __init__(self, token):
         self.token = token
-
-        self.pos_start = self.token.pos_start
-        self.pos_end = self.token.pos_end
+        self.pos_start = token.pos_start
+        self.pos_end = token.pos_end
 
     def __repr__(self):
-        return f'{self.token}'
+        return f"{self.token}"
     
 
 class NodeBinaryOp:
-    def __init__(self, node_left, op_tok, node_right):
-        self.node_left = node_left
+    def __init__(self, left_node, op_tok, right_node):
+        self.left_node = left_node
         self.op_tok = op_tok
-        self.node_right = node_right
-
-        self.pos_start = self.node_left.pos_start
-        self.pos_end = self.node_right.pos_end
+        self.right_node = right_node
+        self.pos_start = left_node.pos_start
+        self.pos_end = right_node.pos_end
 
     def __repr__(self):
-        return f'({self.node_left},{self.op_tok},{self.node_right})'
+        return f"({self.left_node} {self.op_tok} {self.right_node})"
+
+
 
 class NodeUnaryOp:
     def __init__(self, op_tok, node):
@@ -342,35 +360,43 @@ class Parser:
         res = ResultOfParse()
         tok = self.token_current
 
-        if tok.type in (TOKTYPE_PLUS, TOKTYPE_MINUS):
+        if not tok:
+            return res.failure(WrongSyntaxError(
+                self.tokens[self.tok_idx - 1].pos_end if self.tok_idx > 0 else None,
+                None,
+                "Unexpected end of input, expected a number or '('"
+            ))
+
+        if tok.type in (TOKTYPE_PLUS, TOKTYPE_MINUS):  
             res.register(self.next_character())
             factor = res.register(self.factor())
             if res.error: 
                 return res
             return res.success(NodeUnaryOp(tok, factor))
 
-        elif tok.type in (TOKTYPE_INT, TOKTYPE_FLOAT):
+        elif tok.type == TOKTYPE_NUMBER:  
             res.register(self.next_character())
-            return res.success(NodeNumber(tok))
+            return res.success(NodeNumber(tok))  
 
-        elif tok.type == TOKTYPE_LPAREN:
+        elif tok.type == TOKTYPE_LPAREN:  
             res.register(self.next_character())
             expr = res.register(self.expr())
             if res.error: 
                 return res
-            if self.token_current.type == TOKTYPE_RPAREN:
+            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
                 res.register(self.next_character())
                 return res.success(expr)
             else:
                 return res.failure(WrongSyntaxError(
-                    self.token_current.pos_start, self.token_current.pos_end,
-                    "Expected ')'"
+                    tok.pos_start, tok.pos_end,
+                    "Expected ')' after the expression"
                 ))
 
         return res.failure(WrongSyntaxError(
             tok.pos_start, tok.pos_end,
-            "Expected int or float"
+            "Expected a number or '('"
         ))
+
 
     def term(self):
         return self.bin_op(self.factor, (TOKTYPE_MUL, TOKTYPE_DIV))
@@ -387,12 +413,19 @@ class Parser:
         while self.token_current is not None and self.token_current.type in ops:
             op_tok = self.token_current
             res.register(self.next_character())
+            if not self.token_current:  # Check for missing operand
+                return res.failure(WrongSyntaxError(
+                    op_tok.pos_start, op_tok.pos_end,
+                    "Expected a value after the operator"
+                ))
+
             right = res.register(func())
             if res.error:
                 return res
             left = NodeBinaryOp(left, op_tok, right)
 
         return res.success(left)
+
 
 #RESULT OF RUNTIME
 
@@ -463,10 +496,74 @@ class Number:
 
     def __repr__(self):
         return str(self.value)
+    
+#CONTEXT
+
+class Context:
+    def __init__(self, display_name, parent=None, parent_entry_pos=None):
+        self.display_name = display_name
+        self.parent = parent
+        self.parent_entry_pos = parent_entry_pos
 
 #INTERPRETER
 
+class Interpreter:
+    def visit(self, node, context):
+        method_name = f'visit_{type(node).__name__}'
+        method = getattr(self, method_name, self.no_visit_method)
+        return method(node, context)
 
+    def no_visit_method(self, node, context):
+        raise Exception(f'No visit_{type(node).__name__} method defined')
+
+    def visit_NodeNumber(self, node, context):
+        return RuntimeResult().success(
+            Number(node.token.value).set_context(context).set_pos(node.pos_start, node.pos_end)
+        )
+
+    def visit_NodeBinaryOp(self, node, context):
+        res = RuntimeResult()
+        left = res.register(self.visit(node.left_node, context))
+        if res.error:
+            return res
+        right = res.register(self.visit(node.right_node, context))
+        if res.error:
+            return res
+
+        if node.op_tok.type == TOKTYPE_PLUS:
+            result, error = left.added_to(right)
+        elif node.op_tok.type == TOKTYPE_MINUS:
+            result, error = left.subbed_by(right)
+        elif node.op_tok.type == TOKTYPE_MUL:
+            result, error = left.multed_by(right)
+        elif node.op_tok.type == TOKTYPE_DIV:
+            result, error = left.dived_by(right)
+        else:
+            return res.failure(RuntimeError(
+                node.op_tok.pos_start, node.op_tok.pos_end,
+                "Unknown binary operator"
+            ))
+
+        if error:
+            return res.failure(error)
+        else:
+            return res.success(result.set_pos(node.pos_start, node.pos_end))
+
+    def visit_NodeUnaryOp(self, node, context):
+        res = RuntimeResult()
+        number = res.register(self.visit(node.node, context))
+        if res.error:
+            return res
+
+        error = None
+
+        if node.op_tok.type == TOKTYPE_MINUS:
+            number, error = number.multed_by(Number(-1))
+
+        if error:
+            return res.failure(error)
+        else:
+            return res.success(number.set_pos(node.pos_start, node.pos_end))
 
 
 #RUN
@@ -474,5 +571,14 @@ class Number:
 def run(fn, text):
     lexer = Lexer(fn, text)
     tokens, error = lexer.make_tokens()
+    if error: return None, error
 
-    return tokens, error
+    parser = Parser(tokens)
+    ast = parser.parse()
+    if ast.error: return None, ast.error
+    
+    interpreter = Interpreter()
+    context = Context('<program>')
+    result = interpreter.visit(ast.node, context)
+
+    return result.value, result.error
