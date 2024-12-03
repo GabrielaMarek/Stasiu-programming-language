@@ -260,6 +260,9 @@ class NodeNumber:
     def __init__(self, token):
         self.token = token
 
+        self.pos_start = self.token.pos_start
+        self.pos_end = self.token.pos_end
+
     def __repr__(self):
         return f'{self.token}'
     
@@ -269,6 +272,9 @@ class NodeBinaryOp:
         self.node_left = node_left
         self.op_tok = op_tok
         self.node_right = node_right
+
+        self.pos_start = self.node_left.pos_start
+        self.pos_end = self.node_right.pos_end
 
     def __repr__(self):
         return f'({self.node_left},{self.op_tok},{self.node_right})'
@@ -406,6 +412,62 @@ class RuntimeResult:
     def failure(self, error):
         self.error = error
         return self
+
+#VALUES
+class Number:
+    def __init__(self, value: float, pos_start=None, pos_end=None, context=None):
+        self.value = value
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+        self.context = context
+
+    def set_pos(self, pos_start=None, pos_end=None):
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+        return self
+
+    def set_context(self, context=None):
+        self.context = context
+        return self
+
+    def operate(self, other, op, error_message="Invalid operation"):
+        if not isinstance(other, Number):
+            raise ValueError(error_message)
+
+        if op == "add":
+            return Number(self.value + other.value, self.pos_start, other.pos_end, self.context), None
+        elif op == "sub":
+            return Number(self.value - other.value, self.pos_start, other.pos_end, self.context), None
+        elif op == "mul":
+            return Number(self.value * other.value, self.pos_start, other.pos_end, self.context), None
+        elif op == "div":
+            if other.value == 0:
+                return None, RuntimeError(
+                    other.pos_start, other.pos_end, "Division by zero", self.context
+                )
+            return Number(self.value / other.value, self.pos_start, other.pos_end, self.context), None
+        else:
+            raise ValueError("Unsupported operation")
+
+    def added_to(self, other):
+        return self.operate(other, "add")
+
+    def subbed_by(self, other):
+        return self.operate(other, "sub")
+
+    def multed_by(self, other):
+        return self.operate(other, "mul")
+
+    def dived_by(self, other):
+        return self.operate(other, "div")
+
+    def __repr__(self):
+        return str(self.value)
+
+#INTERPRETER
+
+
+
 
 #RUN
 
