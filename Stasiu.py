@@ -58,6 +58,8 @@ TOKTYPE_PLUS       = 'PLUS'
 TOKTYPE_MINUS      = 'MINUS'
 TOKTYPE_MUL        = 'MUL'
 TOKTYPE_DIV        = 'DIV'
+TOKTYPE_POWER      = 'POWER'
+TOKTYPE_SQRT       = 'SQRT'
 
 # Assignment and Variables
 TOKTYPE_EQUALS     = 'EQUALS'
@@ -150,6 +152,7 @@ class Lexer:
             'end': TOKTYPE_END,
             'set': TOKTYPE_SET,
             'to': TOKTYPE_TO,
+            'sqrt': TOKTYPE_SQRT,
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -194,6 +197,10 @@ class Lexer:
                 pos_start = self.pos.copy()
                 self.next_character()
                 tokens.append(Token(TOKTYPE_DIV, pos_start=pos_start, pos_end=self.pos.copy()))
+            elif self.character_current == '^':
+                pos_start = self.pos.copy()
+                self.next_character()
+                tokens.append(Token(TOKTYPE_POWER, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '=':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -295,8 +302,6 @@ class NodeBinaryOp:
     def __repr__(self):
         return f"({self.left_node} {self.op_tok} {self.right_node})"
 
-
-
 class NodeUnaryOp:
     def __init__(self, op_tok, node):
             self.op_tok = op_tok
@@ -352,7 +357,7 @@ class Parser:
         if not res.error and self.token_current is not None:
             return res.failure(WrongSyntaxError(
                 self.token_current.pos_start, self.token_current.pos_end,
-                "Expected '+', '-', '*' or '/'"
+                "Expected '+', '-', '*', '/', or '^'"
             ))
         return res
 
@@ -377,6 +382,14 @@ class Parser:
         elif tok.type == TOKTYPE_NUMBER:  
             res.register(self.next_character())
             return res.success(NodeNumber(tok))  
+        
+        
+        elif tok.type == TOKTYPE_SQRT:  
+            res.register(self.next_character())
+            factor = res.register(self.factor())
+            if res.error:
+                return res
+            return res.success(NodeUnaryOp(tok, factor))
 
         elif tok.type == TOKTYPE_LPAREN:  
             res.register(self.next_character())
@@ -397,12 +410,15 @@ class Parser:
             "Expected a number or '('"
         ))
 
-
+    def power(self):  
+        return self.bin_op(self.factor, (TOKTYPE_POWER,))
+    
     def term(self):
         return self.bin_op(self.factor, (TOKTYPE_MUL, TOKTYPE_DIV))
 
     def expr(self):
-        return self.bin_op(self.term, (TOKTYPE_PLUS, TOKTYPE_MINUS))
+        return self.bin_op(self.power, (TOKTYPE_PLUS, TOKTYPE_MINUS))
+
 
     def bin_op(self, func, ops):
         res = ResultOfParse()
@@ -413,10 +429,10 @@ class Parser:
         while self.token_current is not None and self.token_current.type in ops:
             op_tok = self.token_current
             res.register(self.next_character())
-            if not self.token_current:  # Check for missing operand
+            if not self.token_current: 
                 return res.failure(WrongSyntaxError(
                     op_tok.pos_start, op_tok.pos_end,
-                    "Expected a value after the operator"
+                    f"Expected a value after '{op_tok.value}'"
                 ))
 
             right = res.register(func())
@@ -425,6 +441,7 @@ class Parser:
             left = NodeBinaryOp(left, op_tok, right)
 
         return res.success(left)
+
 
 
 #RESULT OF RUNTIME
@@ -437,6 +454,7 @@ class RuntimeResult:
     def register(self, res):
         if res.error: self.error = res.error
         return res.value
+    
 
     def success(self, value):
         self.value = value
@@ -479,6 +497,8 @@ class Number:
                     other.pos_start, other.pos_end, "Division by zero", self.context
                 )
             return Number(self.value / other.value, self.pos_start, other.pos_end, self.context), None
+        elif op == "pow":
+            return Number(self.value ** other.value, self.pos_start, other.pos_end, self.context), None
         else:
             raise ValueError("Unsupported operation")
 
@@ -493,6 +513,9 @@ class Number:
 
     def dived_by(self, other):
         return self.operate(other, "div")
+    
+    def powed_by(self, other):
+        return self.operate(other, "pow")
 
     def __repr__(self):
         return str(self.value)
@@ -538,6 +561,9 @@ class Interpreter:
             result, error = left.multed_by(right)
         elif node.op_tok.type == TOKTYPE_DIV:
             result, error = left.dived_by(right)
+        elif node.op_tok.type == TOKTYPE_POWER:
+            result, error = left.powed_by(right)
+
         else:
             return res.failure(RuntimeError(
                 node.op_tok.pos_start, node.op_tok.pos_end,
@@ -559,11 +585,19 @@ class Interpreter:
 
         if node.op_tok.type == TOKTYPE_MINUS:
             number, error = number.multed_by(Number(-1))
+        elif node.op_tok.type == TOKTYPE_SQRT:  
+            if number.value < 0:
+                return res.failure(RuntimeError(
+                    node.op_tok.pos_start, node.op_tok.pos_end,
+                    "Cannot take square root of a negative number"
+                ))
+            number = Number(number.value ** 0.5).set_context(number.context).set_pos(node.pos_start, node.pos_end)
 
         if error:
             return res.failure(error)
         else:
             return res.success(number.set_pos(node.pos_start, node.pos_end))
+
 
 
 #RUN
