@@ -201,6 +201,11 @@ class Lexer:
                 pos_start = self.pos.copy()
                 self.next_character()
                 tokens.append(Token(TOKTYPE_POWER, pos_start=pos_start, pos_end=self.pos.copy()))
+            elif self.character_current == 'sqrt':
+                pos_start = self.pos.copy()
+                self.next_character()
+                tokens.append(Token(TOKTYPE_SQRT, pos_start=pos_start, pos_end=self.pos.copy()))
+
             elif self.character_current == '=':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -343,6 +348,8 @@ class Parser:
         self.tokens = tokens
         self.tok_idx = -1
         self.next_character()
+        print(f"Initializing parser with tokens: {self.tokens}")
+
 
     def next_character(self):
         self.tok_idx += 1
@@ -350,10 +357,13 @@ class Parser:
             self.token_current = self.tokens[self.tok_idx]
         else:
             self.token_current = None
+        print(f"next_character: Current token is now {self.token_current}")
         return self.token_current
+
 
     def parse(self):
         res = self.expr()
+        print(f"Final parse result: {res.node}")
         if not res.error and self.token_current is not None:
             return res.failure(WrongSyntaxError(
                 self.token_current.pos_start, self.token_current.pos_end,
@@ -362,6 +372,7 @@ class Parser:
         return res
 
     def factor(self):
+        print(f"Parsing factor with current token: {self.token_current}")
         res = ResultOfParse()
         tok = self.token_current
 
@@ -382,8 +393,7 @@ class Parser:
         elif tok.type == TOKTYPE_NUMBER:  
             res.register(self.next_character())
             return res.success(NodeNumber(tok))  
-        
-        
+            
         elif tok.type == TOKTYPE_SQRT:  
             res.register(self.next_character())
             factor = res.register(self.factor())
@@ -393,31 +403,36 @@ class Parser:
 
         elif tok.type == TOKTYPE_LPAREN:  
             res.register(self.next_character())
-            expr = res.register(self.expr())
-            if res.error: 
+            expr = res.register(self.expr())  
+            if res.error:
                 return res
-            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
+            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:  
                 res.register(self.next_character())
                 return res.success(expr)
             else:
                 return res.failure(WrongSyntaxError(
                     tok.pos_start, tok.pos_end,
-                    "Expected ')' after the expression"
+                    f"Expected ')' after the expression at position {tok.pos_end}"
                 ))
 
         return res.failure(WrongSyntaxError(
             tok.pos_start, tok.pos_end,
-            "Expected a number or '('"
+            f"Expected a number, '(', or 'sqrt' but found '{tok.value}'"
         ))
+
 
     def power(self):  
         return self.bin_op(self.factor, (TOKTYPE_POWER,))
     
     def term(self):
-        return self.bin_op(self.factor, (TOKTYPE_MUL, TOKTYPE_DIV))
+        return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV))
+
+
+    
 
     def expr(self):
-        return self.bin_op(self.power, (TOKTYPE_PLUS, TOKTYPE_MINUS))
+        return self.bin_op(self.term, (TOKTYPE_PLUS, TOKTYPE_MINUS))
+
 
 
     def bin_op(self, func, ops):
@@ -426,21 +441,30 @@ class Parser:
         if res.error:
             return res
 
+        print(f"bin_op: Entering loop with current token {self.token_current} and valid ops {ops}")
         while self.token_current is not None and self.token_current.type in ops:
+            print(f"bin_op: Current token is {self.token_current}, valid ops are {ops}")
             op_tok = self.token_current
             res.register(self.next_character())
-            if not self.token_current: 
+            print(f"bin_op: After next_character, current token: {self.token_current}")
+
+            if not self.token_current:
                 return res.failure(WrongSyntaxError(
                     op_tok.pos_start, op_tok.pos_end,
-                    f"Expected a value after '{op_tok.value}'"
+                    f"Expected a value after operator '{op_tok.value}'"
                 ))
 
             right = res.register(func())
+            print(f"bin_op: Parsed right operand: {right}")
             if res.error:
                 return res
             left = NodeBinaryOp(left, op_tok, right)
+            print(f"bin_op: Created NodeBinaryOp: {left}")
 
         return res.success(left)
+
+
+
 
 
 
@@ -491,6 +515,7 @@ class Number:
             return Number(self.value - other.value, self.pos_start, other.pos_end, self.context), None
         elif op == "mul":
             return Number(self.value * other.value, self.pos_start, other.pos_end, self.context), None
+            print(f"Token generated: {tokens[-1]}")
         elif op == "div":
             if other.value == 0:
                 return None, RuntimeError(
@@ -592,7 +617,7 @@ class Interpreter:
                     "Cannot take square root of a negative number"
                 ))
             number = Number(number.value ** 0.5).set_context(number.context).set_pos(node.pos_start, node.pos_end)
-
+        
         if error:
             return res.failure(error)
         else:
