@@ -189,11 +189,26 @@ class Lexer:
         pos_start = self.pos.copy()
         string_value = ''
         self.next_character()  
-        while self.character_current != '"':
-            string_value += self.character_current
+        escape_characters = {'n': '\n', 't': '\t', '"': '"', '\\': '\\'}
+
+        while self.character_current:
+            if self.character_current == '"':  
+                break
+            if self.character_current == '\\':  
+                self.next_character()
+                if self.character_current in escape_characters:
+                    string_value += escape_characters[self.character_current]
+                else:
+                    string_value += '\\' + self.character_current
+            else:
+                string_value += self.character_current
             self.next_character()
+
+        if self.character_current != '"':  
+            return [], CharacterFormatError(pos_start, self.pos, "Unterminated string")
         self.next_character() 
         return Token(TOKTYPE_STRING, string_value, pos_start, self.pos.copy())
+
 
     def make_tokens(self):
         tokens = []
@@ -228,19 +243,17 @@ class Lexer:
                 pos_start = self.pos.copy()
                 self.next_character()
                 tokens.append(Token(TOKTYPE_POWER, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == 'sqrt':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_SQRT, pos_start=pos_start, pos_end=self.pos.copy()))
 
             elif self.character_current == '=':
                 pos_start = self.pos.copy()
                 self.next_character()
-                if self.character_current == '=':
+                if self.character_current == '=': 
                     self.next_character()
-                    tokens.append(Token(TOKTYPE_EQ, pos_start=pos_start, pos_end=self.pos.copy()))
-                else:
-                    tokens.append(Token(TOKTYPE_EQUALS, pos_start=pos_start, pos_end=self.pos.copy()))
+                    tokens.append(Token(TOKTYPE_EQ, pos_start=pos_start, pos_end=self.pos.copy()))  
+                else:  
+                    tokens.append(Token(TOKTYPE_EQUALS, pos_start=pos_start, pos_end=self.pos.copy()))  
+  
+
             elif self.character_current == '(':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -344,6 +357,37 @@ class NodeUnaryOp:
 
     def __repr__(self):
         return f'({self.op_tok}, {self.node})'
+    
+class NodeVariable:
+    def __init__(self, var_name_tok):
+        self.var_name_tok = var_name_tok
+        self.pos_start = var_name_tok.pos_start
+        self.pos_end = var_name_tok.pos_end
+
+    def __repr__(self):
+        return f"{self.var_name_tok.value}"
+
+    
+class NodeAssign:
+    def __init__(self, var_name, value):
+        self.var_name = var_name
+        self.value = value
+        self.pos_start = var_name.pos_start
+        self.pos_end = value.pos_end
+
+    def __repr__(self):
+        return f"(Assign: {self.var_name.value} = {self.value})"
+    
+class NodeString:
+    def __init__(self, token):
+        self.token = token
+        self.pos_start = token.pos_start
+        self.pos_end = token.pos_end
+
+    def __repr__(self):
+        return f"(String: {self.token.value})"
+
+
 
 #THE RESULT OF PARSE
 
@@ -389,14 +433,14 @@ class Parser:
 
 
     def parse(self):
-        res = self.expr()
-        print(f"Final parse result: {res.node}")
+        res = self.statement()  
         if not res.error and self.token_current is not None:
             return res.failure(WrongSyntaxError(
                 self.token_current.pos_start, self.token_current.pos_end,
-                "Expected '+', '-', '*', '/', or '^'"
+                "Expected end of input"
             ))
         return res
+
 
     def factor(self):
         print(f"Parsing factor with current token: {self.token_current}")
@@ -407,7 +451,7 @@ class Parser:
             return res.failure(WrongSyntaxError(
                 self.tokens[self.tok_idx - 1].pos_end if self.tok_idx > 0 else None,
                 None,
-                "Unexpected end of input, expected a number or '('"
+                "Unexpected end of input, expected a number, string, or '('"
             ))
 
         if tok.type in (TOKTYPE_PLUS, TOKTYPE_MINUS):  
@@ -419,14 +463,15 @@ class Parser:
 
         elif tok.type == TOKTYPE_NUMBER:  
             res.register(self.next_character())
-            return res.success(NodeNumber(tok))  
-            
-        elif tok.type == TOKTYPE_SQRT:  
+            return res.success(NodeNumber(tok))
+
+        elif tok.type == TOKTYPE_STRING:  
             res.register(self.next_character())
-            factor = res.register(self.factor())
-            if res.error:
-                return res
-            return res.success(NodeUnaryOp(tok, factor))
+            return res.success(NodeString(tok))  
+
+        elif tok.type == TOKTYPE_IDENTIFIER:  
+            res.register(self.next_character())
+            return res.success(NodeVariable(tok))  
 
         elif tok.type == TOKTYPE_LPAREN:  
             res.register(self.next_character())
@@ -444,8 +489,33 @@ class Parser:
 
         return res.failure(WrongSyntaxError(
             tok.pos_start, tok.pos_end,
-            f"Expected a number, '(', or 'sqrt' but found '{tok.value}'"
+            f"Expected a number, string, '(', or identifier but found '{tok.value}'"
         ))
+
+
+    def statement(self):
+        if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
+            print(f"statement: Found identifier {self.token_current.value}")
+            var_name = self.token_current
+            self.next_character()
+            print(f"statement: Next token after identifier: {self.token_current}")
+            if self.token_current and self.token_current.type == TOKTYPE_EQUALS:  
+                print(f"statement: Found '=' after identifier {var_name.value}")
+                self.next_character()
+                res = self.expr()  
+                if res.error:
+                    return res  
+                expr = res.node  
+                return ResultOfParse().success(NodeAssign(var_name, expr))  
+            else:
+                return ResultOfParse().failure(WrongSyntaxError(
+                    var_name.pos_start, var_name.pos_end,
+                    "Expected '=' after variable name"
+                ))
+        return self.expr()  
+
+
+
 
 
     def power(self):  
@@ -454,8 +524,6 @@ class Parser:
     def term(self):
         return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV))
 
-
-    
 
     def expr(self):
         return self.bin_op(self.term, (TOKTYPE_PLUS, TOKTYPE_MINUS))
@@ -571,6 +639,26 @@ class Number:
     def __repr__(self):
         return str(self.value)
     
+class String:
+    def __init__(self, value):
+        self.value = value
+        self.pos_start = None
+        self.pos_end = None
+        self.context = None
+
+    def set_context(self, context):
+        self.context = context
+        return self
+
+    def set_pos(self, pos_start, pos_end):
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+        return self
+
+    def __repr__(self):
+        return f'"{self.value}"'
+
+    
 #CONTEXT
 
 class Context:
@@ -578,6 +666,7 @@ class Context:
         self.display_name = display_name
         self.parent = parent
         self.parent_entry_pos = parent_entry_pos
+        self.symbol_table = {}
 
 
 #INTERPRETER
@@ -649,6 +738,23 @@ class Interpreter:
             return res.failure(error)
         else:
             return res.success(number.set_pos(node.pos_start, node.pos_end))
+        
+    def visit_NodeAssign(self, node, context):
+        res = RuntimeResult()
+
+        value = res.register(self.visit(node.value, context))
+        if res.error:
+            return res
+
+        var_name = node.var_name.value
+        context.symbol_table[var_name] = value
+
+        return res.success(value)
+    
+    def visit_NodeString(self, node, context):
+        return RuntimeResult().success(
+            String(node.token.value).set_context(context).set_pos(node.pos_start, node.pos_end)
+        )
 
 
 
