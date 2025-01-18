@@ -668,6 +668,12 @@ class Context:
         self.parent_entry_pos = parent_entry_pos
         self.symbol_table = {}
 
+    def set(self, var_name, value):
+        self.symbol_table[var_name] = value
+
+    def get(self, var_name):
+        return self.symbol_table.get(var_name)
+
 
 #INTERPRETER
 
@@ -756,11 +762,26 @@ class Interpreter:
             String(node.token.value).set_context(context).set_pos(node.pos_start, node.pos_end)
         )
 
+    def visit_NodeVariable(self, node, context):
+        res = RuntimeResult()
+        
+        var_name = node.var_name_tok.value
+        if var_name in context.symbol_table:
+            value = context.symbol_table[var_name]
+            return res.success(value)
+        else:
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"Variable '{var_name}' is not defined",
+                context
+            ))
 
 
 #RUN
 
-def run(fn, text):
+global_context = Context('<program>')
+
+def run(fn, text, context=global_context):
     lexer = Lexer(fn, text)
     tokens, error = lexer.make_tokens()
     if error: return None, error
@@ -770,7 +791,6 @@ def run(fn, text):
     if ast.error: return None, ast.error
     
     interpreter = Interpreter()
-    context = Context('<program>')
     result = interpreter.visit(ast.node, context)
 
     return result.value, result.error
