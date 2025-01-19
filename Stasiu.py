@@ -96,7 +96,9 @@ TOKTYPE_EOF        = 'END_OF_FILE'
 # Keywords
 TOKTYPE_DISPLAY    = 'DISPLAY'
 TOKTYPE_WHEN       = 'WHEN'
-TOKTYPE_OTHERWISE  = 'OTHERWISE'
+TOKTYPE_OTHERWISE_WHEN  = 'OTHERWISE_WHEN'
+TOKTYPE_IN_ANY_OTHER_CASE = "IN_ANY_OTHER_CASE"
+TOKTYPE_THEN       = "THEN"
 TOKTYPE_REPEAT     = 'REPEAT'
 TOKTYPE_CREATE     = 'CREATE'
 TOKTYPE_GIVE       = 'GIVE'
@@ -161,14 +163,50 @@ class Lexer:
     def make_identifier_or_keyword(self):
         pos_start = self.pos.copy()
         identifier_str = ''
+        
         while self.character_current and (self.character_current in LETTERS or self.character_current in DIGITS):
             identifier_str += self.character_current
             self.next_character()
 
+        if identifier_str == "otherwise":
+            if self.character_current and self.character_current in ' \t':
+                self.next_character()
+                second_word = ''
+                while self.character_current and self.character_current in LETTERS:
+                    second_word += self.character_current
+                    self.next_character()
+                if second_word == "when":
+                    return Token(TOKTYPE_OTHERWISE_WHEN, pos_start=pos_start, pos_end=self.pos.copy())
+                else:
+                    return Token(TOKTYPE_IDENTIFIER, identifier_str + ' ' + second_word, pos_start, self.pos.copy())
+        
+        if identifier_str == "in":
+            if self.character_current and self.character_current in ' \t':  
+                self.next_character()
+                second_word = ''
+                while self.character_current and self.character_current in LETTERS:
+                    second_word += self.character_current
+                    self.next_character()
+                if second_word == "any":
+                    if self.character_current and self.character_current in ' \t':  
+                        self.next_character()
+                        third_word = ''
+                        while self.character_current and self.character_current in LETTERS:
+                            third_word += self.character_current
+                            self.next_character()
+                        if third_word == "other":
+                            if self.character_current and self.character_current in ' \t':  
+                                self.next_character()
+                                fourth_word = ''
+                                while self.character_current and self.character_current in LETTERS:
+                                    fourth_word += self.character_current
+                                    self.next_character()
+                                if fourth_word == "case":
+                                    return Token(TOKTYPE_IN_ANY_OTHER_CASE, pos_start=pos_start, pos_end=self.pos.copy())
+                                
         token_type = {
             'display': TOKTYPE_DISPLAY,
             'when': TOKTYPE_WHEN,
-            'otherwise': TOKTYPE_OTHERWISE,
             'repeat': TOKTYPE_REPEAT,
             'create': TOKTYPE_CREATE,
             'give': TOKTYPE_GIVE,
@@ -177,7 +215,8 @@ class Lexer:
             'end': TOKTYPE_END,
             'set': TOKTYPE_SET,
             'to': TOKTYPE_TO,
-            'and': TOKTYPE_AND,   
+            'then': TOKTYPE_THEN,  
+            'and': TOKTYPE_AND,
             'or': TOKTYPE_OR,
             'not': TOKTYPE_NOT,
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
@@ -365,7 +404,14 @@ class NodeString:
 
     def __repr__(self):
         return f"(String: {self.token.value})"
+    
+class NodeConditional:
+    def __init__(self, cases, default_case):
+        self.cases = cases  
+        self.default_case = default_case
 
+    def __repr__(self):
+        return f"NodeConditional(cases={self.cases}, default_case={self.default_case})"
 
 
 #THE RESULT OF PARSE
@@ -397,9 +443,9 @@ class Parser:
     def __init__(self, tokens):
         self.tokens = tokens
         self.tok_idx = -1
+        self.token_current = None
         self.next_character()
         print(f"Initializing parser with tokens: {self.tokens}")
-
 
     def next_character(self):
         self.tok_idx += 1
@@ -410,9 +456,8 @@ class Parser:
         print(f"next_character: Current token is now {self.token_current}")
         return self.token_current
 
-
     def parse(self):
-        res = self.statement()  
+        res = self.statement()
         if not res.error and self.token_current is not None:
             return res.failure(WrongSyntaxError(
                 self.token_current.pos_start, self.token_current.pos_end,
@@ -420,84 +465,30 @@ class Parser:
             ))
         return res
 
-    def factor(self):
-        print(f"Parsing factor with current token: {self.token_current}")
-        res = ResultOfParse()
-        tok = self.token_current
-
-        if not tok:
-            return res.failure(WrongSyntaxError(
-                self.tokens[self.tok_idx - 1].pos_end if self.tok_idx > 0 else None,
-                None,
-                "Unexpected end of input, expected a number, string, or '('"
-            ))
-
-        if tok.type in (TOKTYPE_PLUS, TOKTYPE_MINUS):  
-            res.register(self.next_character())
-            factor = res.register(self.factor())
-            if res.error: 
-                return res
-            return res.success(NodeUnaryOp(tok, factor))
-
-        elif tok.type == TOKTYPE_NUMBER:  
-            res.register(self.next_character())
-            return res.success(NodeNumber(tok))
-
-        elif tok.type == TOKTYPE_STRING:  
-            res.register(self.next_character())
-            return res.success(NodeString(tok))  
-
-        elif tok.type == TOKTYPE_IDENTIFIER:  
-            res.register(self.next_character())
-            return res.success(NodeVariable(tok))  
-
-        elif tok.type == TOKTYPE_LPAREN:  
-            res.register(self.next_character())
-            expr = res.register(self.expr())  
-            if res.error:
-                return res
-            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:  
-                res.register(self.next_character())
-                return res.success(expr)
-            else:
-                return res.failure(WrongSyntaxError(
-                    tok.pos_start, tok.pos_end,
-                    f"Expected ')' after the expression at position {tok.pos_end}"
-                ))
-
-        return res.failure(WrongSyntaxError(
-            tok.pos_start, tok.pos_end,
-            f"Expected a number, string, '(', or identifier but found '{tok.value}'"
-        ))
-
-
     def statement(self):
         res = ResultOfParse()
 
+        if self.token_current and self.token_current.type == TOKTYPE_WHEN:
+            return self.conditional()
+
         if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
-            print(f"statement: Found identifier {self.token_current.value}")
-            var_name = self.token_current  
-            res.register(self.next_character())  
+            var_name = self.token_current
+            res.register(self.next_character())
 
-            if self.token_current and self.token_current.type == TOKTYPE_EQUALS: 
-                print(f"statement: Found '=' after identifier {var_name.value}")
+            if self.token_current and self.token_current.type == TOKTYPE_EQUALS:
                 res.register(self.next_character())
-
                 expr = res.register(self.expr())
                 if res.error:
                     return res
-
-                print(f"statement: Parsed assignment '{var_name.value} = {expr}'")
-                return res.success(NodeAssign(var_name, expr))  
+                return res.success(NodeAssign(var_name, expr))
 
             return res.failure(WrongSyntaxError(
                 var_name.pos_start, var_name.pos_end,
                 "Expected '=' after variable name"
             ))
-        
+
         return self.expr()
 
-    
     def expr(self):
         return self.logical_or()
 
@@ -547,6 +538,12 @@ class Parser:
         res = ResultOfParse()
         tok = self.token_current
 
+        if not tok:
+            return res.failure(WrongSyntaxError(
+                None, None,
+                "Unexpected end of input, expected a number, string, or identifier"
+            ))
+
         if tok.type == TOKTYPE_NUMBER:
             res.register(self.next_character())
             return res.success(NodeNumber(tok))
@@ -566,9 +563,71 @@ class Parser:
             if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
                 res.register(self.next_character())
                 return res.success(expr)
-            return res.failure(SyntaxError("Expected ')'"))
+            return res.failure(WrongSyntaxError(
+                tok.pos_start, tok.pos_end,
+                f"Expected ')' after the expression at position {tok.pos_end}"
+            ))
 
-        return res.failure(SyntaxError(f"Unexpected token: {tok}"))
+        return res.failure(WrongSyntaxError(
+            tok.pos_start, tok.pos_end,
+            f"Unexpected token: '{tok.value}'"
+        ))
+
+    def conditional(self):
+        res = ResultOfParse()
+        cases = []
+        default_case = None
+
+        if self.token_current and self.token_current.type == TOKTYPE_WHEN:
+            print("Parsing 'when' statement")
+            res.register(self.next_character())
+
+            condition = res.register(self.expr())  
+            if res.error: return res
+
+            if self.token_current and self.token_current.type == TOKTYPE_THEN:
+                res.register(self.next_character())
+                body = res.register(self.statement())  
+                if res.error: return res
+                cases.append((condition, body, None))  
+            else:
+                return res.failure(WrongSyntaxError(
+                    condition.pos_start, condition.pos_end,
+                    "Expected 'then' after condition in 'when' statement"
+                ))
+
+            while self.token_current and self.token_current.type == TOKTYPE_OTHERWISE_WHEN:
+                print("Parsing 'otherwise when' statement")
+                res.register(self.next_character())
+
+                condition = res.register(self.expr())  
+                if res.error: return res
+
+                if self.token_current and self.token_current.type == TOKTYPE_THEN:
+                    res.register(self.next_character())
+                    body = res.register(self.statement())  
+                    if res.error: return res
+                    cases.append((condition, body, None))  
+                else:
+                    return res.failure(WrongSyntaxError(
+                        condition.pos_start, condition.pos_end,
+                        "Expected 'then' after condition in 'otherwise when' statement"
+                    ))
+
+            if self.token_current and self.token_current.type == TOKTYPE_IN_ANY_OTHER_CASE:
+                print("Parsing 'in any other case' statement")
+                res.register(self.next_character())
+                default_case = res.register(self.statement())
+                if res.error: return res
+
+            return res.success(NodeConditional(cases, default_case))
+
+        return res.failure(WrongSyntaxError(
+            self.token_current.pos_start if self.token_current else None,
+            self.token_current.pos_end if self.token_current else None,
+            "Expected 'when', 'otherwise when', or 'in any other case'"
+        ))
+
 
     def bin_op(self, func_a, ops, func_b=None):
         if func_b is None:
@@ -583,18 +642,12 @@ class Parser:
             op_tok = self.token_current
             print(f"bin_op: Found operator '{op_tok.type}'")
             res.register(self.next_character())
-            if not self.token_current:
-                return res.failure(WrongSyntaxError(
-                    op_tok.pos_start, op_tok.pos_end,
-                    f"Expected expression after operator '{op_tok.value}'"
-                ))
             right = res.register(func_b())
             if res.error:
                 return res
             left = NodeBinaryOp(left, op_tok, right)
 
         return res.success(left)
-
 
 
 #RESULT OF RUNTIME
@@ -734,7 +787,7 @@ class Interpreter:
         right = res.register(self.visit(node.right_node, context))
         if res.error:
             return res
-        
+
         result = None
         error = None
 
@@ -749,22 +802,22 @@ class Interpreter:
         elif node.op_tok.type == TOKTYPE_POWER:
             result, error = left.powed_by(right)
 
-        elif node.op_tok.type == TOKTYPE_LT:
-            result = Number(1 if left.value < right.value else 0)
-        elif node.op_tok.type == TOKTYPE_LTE:
-            result = Number(1 if left.value <= right.value else 0)
         elif node.op_tok.type == TOKTYPE_GT:
-            result = Number(1 if left.value > right.value else 0)
-        elif node.op_tok.type == TOKTYPE_GTE:
-            result = Number(1 if left.value >= right.value else 0)
-        elif node.op_tok.type == TOKTYPE_EQ:
-            result = Number(1 if left.value == right.value else 0)
-        elif node.op_tok.type == TOKTYPE_NE:
-            result = Number(1 if left.value != right.value else 0)
+            result = Number(left.value > right.value)
+        elif node.op_tok.type == TOKTYPE_LT: 
+            result = Number(left.value < right.value)
+        elif node.op_tok.type == TOKTYPE_GTE:  
+            result = Number(left.value >= right.value)
+        elif node.op_tok.type == TOKTYPE_LTE:  
+            result = Number(left.value <= right.value)
+        elif node.op_tok.type == TOKTYPE_EQ:  
+            result = Number(left.value == right.value)
+        elif node.op_tok.type == TOKTYPE_NE:  
+            result = Number(left.value != right.value)
 
-        elif node.op_tok.type == TOKTYPE_AND:
+        elif node.op_tok.type == TOKTYPE_AND:  
             result = Number(1 if left.value and right.value else 0)
-        elif node.op_tok.type == TOKTYPE_OR:
+        elif node.op_tok.type == TOKTYPE_OR:  
             result = Number(1 if left.value or right.value else 0)
 
         else:
@@ -779,6 +832,7 @@ class Interpreter:
             return res.success(result.set_pos(node.pos_start, node.pos_end))
 
 
+
     def visit_NodeUnaryOp(self, node, context):
         res = RuntimeResult()
         number = res.register(self.visit(node.node, context))
@@ -789,7 +843,7 @@ class Interpreter:
 
         if node.op_tok.type == TOKTYPE_MINUS:
             number, error = number.multed_by(Number(-1))
-        elif node.op_tok.type == TOKTYPE_SQRT:  
+        elif node.op_tok.type == TOKTYPE_SQRT:
             if number.value < 0:
                 return res.failure(RuntimeError(
                     node.op_tok.pos_start, node.op_tok.pos_end,
@@ -797,11 +851,13 @@ class Interpreter:
                 ))
             number = Number(number.value ** 0.5).set_context(number.context).set_pos(node.pos_start, node.pos_end)
         elif node.op_tok.type == TOKTYPE_NOT:
-            result = Number(1 if not number.value else 0)
+            number = Number(1 if not number.value else 0).set_context(number.context).set_pos(node.pos_start, node.pos_end)
+
         if error:
             return res.failure(error)
         else:
             return res.success(number.set_pos(node.pos_start, node.pos_end))
+
         
     def visit_NodeAssign(self, node, context):
         res = RuntimeResult()
@@ -833,6 +889,30 @@ class Interpreter:
                 f"Variable '{var_name}' is not defined",
                 context
             ))
+        
+    def visit_NodeConditional(self, node, context):
+        res = RuntimeResult()
+
+        for condition, body, _ in node.cases:
+            condition_value = res.register(self.visit(condition, context))
+            if res.error:
+                return res
+            
+            if condition_value.value:  
+                body_value = res.register(self.visit(body, context))
+                if res.error:
+                    return res
+                return res.success(body_value)
+
+        if node.default_case:
+            default_value = res.register(self.visit(node.default_case, context))
+            if res.error:
+                return res
+            return res.success(default_value)
+
+        return res.success(None)
+
+  
 
 
 #RUN
