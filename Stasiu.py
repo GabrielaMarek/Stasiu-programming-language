@@ -46,10 +46,6 @@ class RuntimeError(Error):
 
         return 'Traceback (most recent call last):\n' + result
 
-
-
-    
-
 #POSITION
 
 class Position:
@@ -181,7 +177,9 @@ class Lexer:
             'end': TOKTYPE_END,
             'set': TOKTYPE_SET,
             'to': TOKTYPE_TO,
-            'sqrt': TOKTYPE_SQRT,
+            'and': TOKTYPE_AND,   
+            'or': TOKTYPE_OR,
+            'not': TOKTYPE_NOT,
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -499,40 +497,78 @@ class Parser:
         
         return self.expr()
 
-
-    
-    def comparison(self):
-        res = ResultOfParse()
-        left = res.register(self.expr()) 
-        if res.error:
-            return res
-
-        while self.token_current and self.token_current.type in (
-            TOKTYPE_LT, TOKTYPE_LTE, TOKTYPE_GT, TOKTYPE_GTE, TOKTYPE_EQ, TOKTYPE_NE
-        ):
-            op_tok = self.token_current
-            res.register(self.next_character())
-            right = res.register(self.expr())
-            if res.error:
-                return res
-            left = NodeBinaryOp(left, op_tok, right)
-
-        return res.success(left)
     
     def expr(self):
-        return self.bin_op(self.logical_expr, (TOKTYPE_AND, TOKTYPE_OR))
+        return self.logical_or()
 
-    def logical_expr(self):
-        return self.bin_op(self.comp_expr, (TOKTYPE_LT, TOKTYPE_GT, TOKTYPE_LTE, TOKTYPE_GTE, TOKTYPE_EQ, TOKTYPE_NE))
+    def logical_or(self):
+        return self.bin_op(self.logical_and, (TOKTYPE_OR,))
 
-    def comp_expr(self):
-        return self.bin_op(self.term, (TOKTYPE_PLUS, TOKTYPE_MINUS))
+    def logical_and(self):
+        return self.bin_op(self.logical_not, (TOKTYPE_AND,))
+
+    def logical_not(self):
+        res = ResultOfParse()
+        tok = self.token_current
+
+        if tok and tok.type == TOKTYPE_NOT:
+            res.register(self.next_character())
+            node = res.register(self.logical_not())
+            if res.error: return res
+            return res.success(NodeUnaryOp(tok, node))
+
+        return self.comparison()
+
+    def comparison(self):
+        return self.bin_op(self.term, (TOKTYPE_LT, TOKTYPE_LTE, TOKTYPE_GT, TOKTYPE_GTE, TOKTYPE_EQ, TOKTYPE_NE))
 
     def term(self):
+        return self.bin_op(self.factor, (TOKTYPE_PLUS, TOKTYPE_MINUS))
+
+    def factor(self):
         return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV))
 
     def power(self):
-        return self.bin_op(self.factor, (TOKTYPE_POWER,))
+        return self.bin_op(self.unary, (TOKTYPE_POWER,))
+
+    def unary(self):
+        res = ResultOfParse()
+        tok = self.token_current
+
+        if tok and tok.type in (TOKTYPE_PLUS, TOKTYPE_MINUS):
+            res.register(self.next_character())
+            node = res.register(self.unary())
+            if res.error: return res
+            return res.success(NodeUnaryOp(tok, node))
+
+        return self.primary()
+
+    def primary(self):
+        res = ResultOfParse()
+        tok = self.token_current
+
+        if tok.type == TOKTYPE_NUMBER:
+            res.register(self.next_character())
+            return res.success(NodeNumber(tok))
+
+        if tok.type == TOKTYPE_STRING:
+            res.register(self.next_character())
+            return res.success(NodeString(tok))
+
+        if tok.type == TOKTYPE_IDENTIFIER:
+            res.register(self.next_character())
+            return res.success(NodeVariable(tok))
+
+        if tok.type == TOKTYPE_LPAREN:
+            res.register(self.next_character())
+            expr = res.register(self.expr())
+            if res.error: return res
+            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
+                res.register(self.next_character())
+                return res.success(expr)
+            return res.failure(SyntaxError("Expected ')'"))
+
+        return res.failure(SyntaxError(f"Unexpected token: {tok}"))
 
     def bin_op(self, func_a, ops, func_b=None):
         if func_b is None:
