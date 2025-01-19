@@ -125,7 +125,9 @@ TOKTYPE_LTE        = 'LESS_THAN_EQUAL'
 TOKTYPE_GTE        = 'GREATER_THAN_EQUAL'
 TOKTYPE_EQ         = 'EQUALS_EQUAL'
 TOKTYPE_NE         = 'NOT_EQUAL'
-
+TOKTYPE_AND        = 'AND'
+TOKTYPE_OR         = 'OR'
+TOKTYPE_NOT        = 'NOT'
 
 
 class Token:
@@ -212,7 +214,21 @@ class Lexer:
 
     def make_tokens(self):
         tokens = []
-
+    
+        SINGLE_CHAR_TOKENS = {
+            '+': TOKTYPE_PLUS,
+            '-': TOKTYPE_MINUS,
+            '*': TOKTYPE_MUL,
+            '/': TOKTYPE_DIV,
+            '^': TOKTYPE_POWER,
+            '(': TOKTYPE_LPAREN,
+            ')': TOKTYPE_RPAREN,
+            '[': TOKTYPE_LBRACKET,
+            ']': TOKTYPE_RBRACKET,
+            ':': TOKTYPE_COLON,
+            ',': TOKTYPE_COMMA,
+        }
+        
         while self.character_current:
             if self.character_current in ' \t\n':
                 self.next_character()
@@ -223,45 +239,27 @@ class Lexer:
             elif self.character_current == '#':
                 while self.character_current and self.character_current != '\n':
                     self.next_character()
-            elif self.character_current == '+':
+            elif self.character_current in SINGLE_CHAR_TOKENS:
                 pos_start = self.pos.copy()
+                tok_type = SINGLE_CHAR_TOKENS[self.character_current]
                 self.next_character()
-                tokens.append(Token(TOKTYPE_PLUS, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == '-':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_MINUS, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == '*':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_MUL, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == '/':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_DIV, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == '^':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_POWER, pos_start=pos_start, pos_end=self.pos.copy()))
-
+                tokens.append(Token(tok_type, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '=':
                 pos_start = self.pos.copy()
                 self.next_character()
-                if self.character_current == '=': 
+                if self.character_current == '=':
                     self.next_character()
-                    tokens.append(Token(TOKTYPE_EQ, pos_start=pos_start, pos_end=self.pos.copy()))  
-                else:  
-                    tokens.append(Token(TOKTYPE_EQUALS, pos_start=pos_start, pos_end=self.pos.copy()))  
-  
-
-            elif self.character_current == '(':
+                    tokens.append(Token(TOKTYPE_EQ, pos_start=pos_start, pos_end=self.pos.copy()))
+                else:
+                    tokens.append(Token(TOKTYPE_EQUALS, pos_start=pos_start, pos_end=self.pos.copy()))
+            elif self.character_current == '!':
                 pos_start = self.pos.copy()
                 self.next_character()
-                tokens.append(Token(TOKTYPE_LPAREN, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == ')':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_RPAREN, pos_start=pos_start, pos_end=self.pos.copy()))
+                if self.character_current == '=':
+                    self.next_character()
+                    tokens.append(Token(TOKTYPE_NE, pos_start=pos_start, pos_end=self.pos.copy()))
+                else:
+                    return [], CharacterFormatError(pos_start, self.pos, "'!' without '='")
             elif self.character_current == '<':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -278,29 +276,13 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_GTE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
                     tokens.append(Token(TOKTYPE_GT, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == '[':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_LBRACKET, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == ']':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_RBRACKET, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == ':':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_COLON, pos_start=pos_start, pos_end=self.pos.copy()))
-            elif self.character_current == ',':
-                pos_start = self.pos.copy()
-                self.next_character()
-                tokens.append(Token(TOKTYPE_COMMA, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '"':
                 tokens.append(self.make_string())
             else:
                 pos_start = self.pos.copy()
                 char = self.character_current
                 self.next_character()
-                return [], CharacterFormatError(pos_start, self.pos, "'" + char + "'")
+                return [], CharacterFormatError(pos_start, self.pos, f"'{char}'")
 
         return tokens, None
     
@@ -321,7 +303,6 @@ class Lexer:
             return Token(TOKTYPE_NUMBER, int(num_str), pos_start, self.pos.copy())
         else: 
             return Token(TOKTYPE_NUMBER, float(num_str), pos_start, self.pos.copy())
-
 
         
 #NODES
@@ -437,10 +418,9 @@ class Parser:
         if not res.error and self.token_current is not None:
             return res.failure(WrongSyntaxError(
                 self.token_current.pos_start, self.token_current.pos_end,
-                "Expected end of input"
+                f"Expected end of input, found '{self.token_current.value}'"
             ))
         return res
-
 
     def factor(self):
         print(f"Parsing factor with current token: {self.token_current}")
@@ -494,71 +474,90 @@ class Parser:
 
 
     def statement(self):
+        res = ResultOfParse()
+
         if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
             print(f"statement: Found identifier {self.token_current.value}")
-            var_name = self.token_current
-            self.next_character()
-            print(f"statement: Next token after identifier: {self.token_current}")
-            if self.token_current and self.token_current.type == TOKTYPE_EQUALS:  
+            var_name = self.token_current  
+            res.register(self.next_character())  
+
+            if self.token_current and self.token_current.type == TOKTYPE_EQUALS: 
                 print(f"statement: Found '=' after identifier {var_name.value}")
-                self.next_character()
-                res = self.expr()  
+                res.register(self.next_character())
+
+                expr = res.register(self.expr())
                 if res.error:
-                    return res  
-                expr = res.node  
-                return ResultOfParse().success(NodeAssign(var_name, expr))  
-            else:
-                return ResultOfParse().failure(WrongSyntaxError(
-                    var_name.pos_start, var_name.pos_end,
-                    "Expected '=' after variable name"
-                ))
-        return self.expr()  
+                    return res
+
+                print(f"statement: Parsed assignment '{var_name.value} = {expr}'")
+                return res.success(NodeAssign(var_name, expr))  
+
+            return res.failure(WrongSyntaxError(
+                var_name.pos_start, var_name.pos_end,
+                "Expected '=' after variable name"
+            ))
+        
+        return self.expr()
 
 
-
-
-
-    def power(self):  
-        return self.bin_op(self.factor, (TOKTYPE_POWER,))
     
-    def term(self):
-        return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV))
-
-
-    def expr(self):
-        return self.bin_op(self.term, (TOKTYPE_PLUS, TOKTYPE_MINUS))
-
-
-    def bin_op(self, func, ops):
+    def comparison(self):
         res = ResultOfParse()
-        left = res.register(func())
+        left = res.register(self.expr()) 
         if res.error:
             return res
 
-        print(f"bin_op: Entering loop with current token {self.token_current} and valid ops {ops}")
-        while self.token_current is not None and self.token_current.type in ops:
-            print(f"bin_op: Current token is {self.token_current}, valid ops are {ops}")
+        while self.token_current and self.token_current.type in (
+            TOKTYPE_LT, TOKTYPE_LTE, TOKTYPE_GT, TOKTYPE_GTE, TOKTYPE_EQ, TOKTYPE_NE
+        ):
             op_tok = self.token_current
             res.register(self.next_character())
-            print(f"bin_op: After next_character, current token: {self.token_current}")
-
-            if not self.token_current:
-                return res.failure(WrongSyntaxError(
-                    op_tok.pos_start, op_tok.pos_end,
-                    f"Expected a value after operator '{op_tok.value}'"
-                ))
-
-            right = res.register(func())
-            print(f"bin_op: Parsed right operand: {right}")
+            right = res.register(self.expr())
             if res.error:
                 return res
             left = NodeBinaryOp(left, op_tok, right)
-            print(f"bin_op: Created NodeBinaryOp: {left}")
 
         return res.success(left)
+    
+    def expr(self):
+        return self.bin_op(self.logical_expr, (TOKTYPE_AND, TOKTYPE_OR))
 
+    def logical_expr(self):
+        return self.bin_op(self.comp_expr, (TOKTYPE_LT, TOKTYPE_GT, TOKTYPE_LTE, TOKTYPE_GTE, TOKTYPE_EQ, TOKTYPE_NE))
 
+    def comp_expr(self):
+        return self.bin_op(self.term, (TOKTYPE_PLUS, TOKTYPE_MINUS))
 
+    def term(self):
+        return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV))
+
+    def power(self):
+        return self.bin_op(self.factor, (TOKTYPE_POWER,))
+
+    def bin_op(self, func_a, ops, func_b=None):
+        if func_b is None:
+            func_b = func_a
+
+        res = ResultOfParse()
+        left = res.register(func_a())
+        if res.error:
+            return res
+
+        while self.token_current is not None and self.token_current.type in ops:
+            op_tok = self.token_current
+            print(f"bin_op: Found operator '{op_tok.type}'")
+            res.register(self.next_character())
+            if not self.token_current:
+                return res.failure(WrongSyntaxError(
+                    op_tok.pos_start, op_tok.pos_end,
+                    f"Expected expression after operator '{op_tok.value}'"
+                ))
+            right = res.register(func_b())
+            if res.error:
+                return res
+            left = NodeBinaryOp(left, op_tok, right)
+
+        return res.success(left)
 
 
 
@@ -699,6 +698,9 @@ class Interpreter:
         right = res.register(self.visit(node.right_node, context))
         if res.error:
             return res
+        
+        result = None
+        error = None
 
         if node.op_tok.type == TOKTYPE_PLUS:
             result, error = left.added_to(right)
@@ -711,6 +713,24 @@ class Interpreter:
         elif node.op_tok.type == TOKTYPE_POWER:
             result, error = left.powed_by(right)
 
+        elif node.op_tok.type == TOKTYPE_LT:
+            result = Number(1 if left.value < right.value else 0)
+        elif node.op_tok.type == TOKTYPE_LTE:
+            result = Number(1 if left.value <= right.value else 0)
+        elif node.op_tok.type == TOKTYPE_GT:
+            result = Number(1 if left.value > right.value else 0)
+        elif node.op_tok.type == TOKTYPE_GTE:
+            result = Number(1 if left.value >= right.value else 0)
+        elif node.op_tok.type == TOKTYPE_EQ:
+            result = Number(1 if left.value == right.value else 0)
+        elif node.op_tok.type == TOKTYPE_NE:
+            result = Number(1 if left.value != right.value else 0)
+
+        elif node.op_tok.type == TOKTYPE_AND:
+            result = Number(1 if left.value and right.value else 0)
+        elif node.op_tok.type == TOKTYPE_OR:
+            result = Number(1 if left.value or right.value else 0)
+
         else:
             return res.failure(RuntimeError(
                 node.op_tok.pos_start, node.op_tok.pos_end,
@@ -721,6 +741,7 @@ class Interpreter:
             return res.failure(error)
         else:
             return res.success(result.set_pos(node.pos_start, node.pos_end))
+
 
     def visit_NodeUnaryOp(self, node, context):
         res = RuntimeResult()
@@ -739,7 +760,8 @@ class Interpreter:
                     "Cannot take square root of a negative number"
                 ))
             number = Number(number.value ** 0.5).set_context(number.context).set_pos(node.pos_start, node.pos_end)
-        
+        elif node.op_tok.type == TOKTYPE_NOT:
+            result = Number(1 if not number.value else 0)
         if error:
             return res.failure(error)
         else:
