@@ -107,6 +107,11 @@ TOKTYPE_END        = 'END'
 TOKTYPE_START      = 'START'
 TOKTYPE_SET        = 'SET'
 TOKTYPE_TO         = 'TO'
+TOKTYPE_REPEAT     = "REPEAT"
+TOKTYPE_FROM       = "FROM"
+TOKTYPE_TO         = "TO"
+TOKTYPE_STEP       = "STEP"
+
 
 # Symbols
 TOKTYPE_LBRACKET   = 'LBRACKET'
@@ -126,6 +131,7 @@ TOKTYPE_NE         = 'NOT_EQUAL'
 TOKTYPE_AND        = 'AND'
 TOKTYPE_OR         = 'OR'
 TOKTYPE_NOT        = 'NOT'
+
 
 
 class Token:
@@ -219,6 +225,8 @@ class Lexer:
             'and': TOKTYPE_AND,
             'or': TOKTYPE_OR,
             'not': TOKTYPE_NOT,
+            'from': TOKTYPE_FROM,
+            'step': TOKTYPE_STEP
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -413,6 +421,19 @@ class NodeConditional:
     def __repr__(self):
         return f"NodeConditional(cases={self.cases}, default_case={self.default_case})"
 
+class NodeRepeat:
+    def __init__(self, start_value, end_value, step_value, body):
+        self.start_value = start_value
+        self.end_value = end_value
+        self.step_value = step_value
+        self.body = body
+
+        self.pos_start = start_value.pos_start
+        self.pos_end = body.pos_end
+
+    def __repr__(self):
+        return f"(Repeat: from {self.start_value} to {self.end_value} step {self.step_value} do {self.body})"
+
 
 #THE RESULT OF PARSE
 
@@ -467,6 +488,9 @@ class Parser:
 
     def statement(self):
         res = ResultOfParse()
+
+        if self.token_current and self.token_current.type == TOKTYPE_REPEAT:
+            return self.repeat_statement()
 
         if self.token_current and self.token_current.type == TOKTYPE_WHEN:
             return self.conditional()
@@ -627,6 +651,55 @@ class Parser:
             self.token_current.pos_end if self.token_current else None,
             "Expected 'when', 'otherwise when', or 'in any other case'"
         ))
+
+    def repeat_statement(self):
+        res = ResultOfParse()
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_REPEAT):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'repeat'"
+            ))
+
+        res.register(self.next_character())  
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_FROM):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'from'"
+            ))
+
+        res.register(self.next_character())  
+        start_value = res.register(self.expr())
+        if res.error:
+            return res
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_TO):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'to'"
+            ))
+
+        res.register(self.next_character())  
+        end_value = res.register(self.expr())
+        if res.error:
+            return res
+
+        step_value = None
+        if self.token_current and self.token_current.type == TOKTYPE_STEP:
+            res.register(self.next_character())  
+            step_value = res.register(self.expr())
+            if res.error:
+                return res
+
+        body = res.register(self.statement())
+        if res.error:
+            return res
+
+        if step_value is None:
+            step_value = NodeNumber(Token(TOKTYPE_NUMBER, 1))  
+
+        return res.success(NodeRepeat(start_value, end_value, step_value, body))
 
 
     def bin_op(self, func_a, ops, func_b=None):
@@ -912,6 +985,30 @@ class Interpreter:
 
         return res.success(None)
 
+    def visit_NodeRepeat(self, node, context):
+        res = RuntimeResult()
+
+        start_value = res.register(self.visit(node.start_value, context))
+        if res.error:
+            return res
+
+        end_value = res.register(self.visit(node.end_value, context))
+        if res.error:
+            return res
+
+        step_value = res.register(self.visit(node.step_value, context))
+        if res.error:
+            return res
+
+        i = start_value.value
+        while (i <= end_value.value if step_value.value > 0 else i >= end_value.value):
+            res.register(self.visit(node.body, context))
+            if res.error:
+                return res
+            i += step_value.value
+
+        return res.success(None)
+
   
 
 
@@ -922,12 +1019,14 @@ global_context = Context('<program>')
 def run(fn, text, context=global_context):
     lexer = Lexer(fn, text)
     tokens, error = lexer.make_tokens()
-    if error: return None, error
 
+    if error:
+        return None, error
     parser = Parser(tokens)
     ast = parser.parse()
-    if ast.error: return None, ast.error
-    
+    if ast.error:
+        return None, ast.error
+
     interpreter = Interpreter()
     result = interpreter.visit(ast.node, context)
 
