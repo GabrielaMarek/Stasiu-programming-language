@@ -111,6 +111,7 @@ TOKTYPE_REPEAT     = "REPEAT"
 TOKTYPE_FROM       = "FROM"
 TOKTYPE_TO         = "TO"
 TOKTYPE_STEP       = "STEP"
+TOKTYPE_WHILE      = "WHILE"
 
 
 # Symbols
@@ -226,7 +227,8 @@ class Lexer:
             'or': TOKTYPE_OR,
             'not': TOKTYPE_NOT,
             'from': TOKTYPE_FROM,
-            'step': TOKTYPE_STEP
+            'step': TOKTYPE_STEP,
+            'while': TOKTYPE_WHILE
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -433,6 +435,14 @@ class NodeRepeat:
 
     def __repr__(self):
         return f"(Repeat: from {self.start_value} to {self.end_value} step {self.step_value} do {self.body})"
+    
+class NodeWhile:
+    def __init__(self, condition, body):
+        self.condition = condition
+        self.body = body
+
+    def __repr__(self):
+        return f"NodeWhile(condition={self.condition}, body={self.body})"
 
 
 #THE RESULT OF PARSE
@@ -489,6 +499,9 @@ class Parser:
     def statement(self):
         res = ResultOfParse()
 
+        if self.token_current and self.token_current.type == TOKTYPE_WHILE:
+            return self.while_statement()
+        
         if self.token_current and self.token_current.type == TOKTYPE_REPEAT:
             return self.repeat_statement()
 
@@ -700,6 +713,32 @@ class Parser:
             step_value = NodeNumber(Token(TOKTYPE_NUMBER, 1))  
 
         return res.success(NodeRepeat(start_value, end_value, step_value, body))
+    
+    def while_statement(self):
+        res = ResultOfParse()
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_WHILE):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'while'"
+            ))
+
+        res.register(self.next_character())
+
+        condition = res.register(self.expr())
+        if res.error: return res
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_THEN):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'then' after while condition"
+            ))
+
+        res.register(self.next_character())
+        body = res.register(self.statement())
+        if res.error: return res
+
+        return res.success(NodeWhile(condition, body))
 
 
     def bin_op(self, func_a, ops, func_b=None):
@@ -1009,7 +1048,22 @@ class Interpreter:
 
         return res.success(None)
 
-  
+    def visit_NodeWhile(self, node, context):
+        res = RuntimeResult()
+
+        while True:
+            condition = res.register(self.visit(node.condition, context))
+            if res.error: 
+                return res
+
+            if not condition.value: 
+                break
+
+            res.register(self.visit(node.body, context))
+            if res.error: 
+                return res
+
+        return res.success(None)
 
 
 #RUN
