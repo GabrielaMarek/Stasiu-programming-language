@@ -225,7 +225,8 @@ class Lexer:
             'not': TOKTYPE_NOT,
             'from': TOKTYPE_FROM,
             'step': TOKTYPE_STEP,
-            'while': TOKTYPE_WHILE
+            'while': TOKTYPE_WHILE,
+            'create': TOKTYPE_CREATE
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -450,6 +451,27 @@ class NodeDisplay:
     def __repr__(self):
         return f"NodeDisplay(value={self.value}, pos_start={self.pos_start}, pos_end={self.pos_end})"
 
+class NodeFunction:
+    def __init__(self, name, params, body, pos_start, pos_end):
+        self.name = name
+        self.params = params
+        self.body = body
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"NodeFunction(name={self.name}, params={self.params}, body={self.body})"
+    
+class NodeCall:
+    def __init__(self, node_to_call, args, pos_start, pos_end):
+        self.node_to_call = node_to_call
+        self.args = args
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"NodeCall(node={self.node_to_call}, args={self.args})"
+
 #THE RESULT OF PARSE
 
 class ResultOfParse:
@@ -482,6 +504,7 @@ class Parser:
         self.token_current = None
         self.next_character()
         print(f"Initializing parser with tokens: {self.tokens}")
+        self.function_definitions = {}
 
     def next_character(self):
         self.tok_idx += 1
@@ -504,6 +527,9 @@ class Parser:
     def statement(self):
         res = ResultOfParse()
 
+        if self.token_current and self.token_current.type == TOKTYPE_CREATE:
+            return self.function_def_statement()
+
         if self.token_current and self.token_current.type == TOKTYPE_DISPLAY:
             return self.display_statement()
 
@@ -517,20 +543,26 @@ class Parser:
             return self.conditional()
 
         if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
-            var_name = self.token_current
-            res.register(self.next_character())
-
-            if self.token_current and self.token_current.type == TOKTYPE_EQUALS:
+            next_token = self.peek()
+            if next_token and next_token.type == TOKTYPE_LPAREN:  
+                return self.function_call()
+            else:
+                var_name = self.token_current
                 res.register(self.next_character())
-                expr = res.register(self.expr())
-                if res.error:
-                    return res
-                return res.success(NodeAssign(var_name, expr))
 
-            return res.failure(WrongSyntaxError(
-                var_name.pos_start, var_name.pos_end,
-                "Expected '=' after variable name"
-            ))
+                if self.token_current and self.token_current.type == TOKTYPE_EQUALS:
+                    res.register(self.next_character())
+                    expr = res.register(self.expr())
+                    if res.error:
+                        return res
+                    return res.success(NodeAssign(var_name, expr))
+
+                return res.failure(WrongSyntaxError(
+                    var_name.pos_start, var_name.pos_end,
+                    "Expected '=' after variable name for assignment"
+                ))
+
+        return self.expr()
 
         return self.expr()
 
@@ -774,6 +806,131 @@ class Parser:
 
         pos_end = value.pos_end if hasattr(value, 'pos_end') else pos_start
         return res.success(NodeDisplay(value, pos_start, pos_end))
+    
+    def function_def_statement(self):
+        res = ResultOfParse()
+        pos_start = self.token_current.pos_start.copy()
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_CREATE):
+            return res.failure(WrongSyntaxError(
+                pos_start, self.token_current.pos_end,
+                "Expected 'create' for function definition"
+            ))
+
+        res.register(self.next_character())
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected function name after 'create'"
+            ))
+
+        func_name = self.token_current
+        res.register(self.next_character())
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_LPAREN):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected '(' after function name"
+            ))
+
+        res.register(self.next_character())
+        params = res.register(self.make_params())
+        if res.error: return res
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_RPAREN):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected ')' after parameters"
+            ))
+
+        res.register(self.next_character())
+        body = res.register(self.statement())
+        if res.error: return res
+
+        pos_end = body.pos_end if body else self.pos.copy()  
+
+        self.function_definitions[func_name.value] = NodeFunction(func_name, params, body, pos_start, pos_end)
+
+        return res.success(NodeFunction(func_name, params, body, pos_start, pos_end))
+    
+    def make_params(self):
+        res = ResultOfParse()
+        params = []
+
+        if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
+            return res.success(params)
+
+        while self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
+            params.append(self.token_current)
+            res.register(self.next_character())
+
+            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
+                break
+
+            if not (self.token_current and self.token_current.type == TOKTYPE_COMMA):
+                return res.failure(WrongSyntaxError(
+                    self.token_current.pos_start, self.token_current.pos_end,
+                    "Expected ',' between parameters"
+                ))
+            res.register(self.next_character())
+
+        return res.success(params)
+    
+    def function_call(self):
+        res = ResultOfParse()
+        func_name = self.token_current
+        func_pos_start = func_name.pos_start
+        res.register(self.next_character())
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_LPAREN):
+            return res.failure(WrongSyntaxError(
+                func_name.pos_start, func_name.pos_end,
+                "Expected '(' after function name for call"
+            ))
+
+        res.register(self.next_character())
+        args = res.register(self.call_args())
+        if res.error: return res
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_RPAREN):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected ')' to close function call"
+            ))
+
+        func_pos_end = self.token_current.pos_end
+        res.register(self.next_character())
+
+        return res.success(NodeCall(NodeVariable(func_name), args, func_pos_start, func_pos_end))
+
+    def call_args(self):
+        res = ResultOfParse()
+        args = []
+
+        if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
+            return res.success(args)
+
+        while self.token_current:
+            args.append(res.register(self.expr()))
+            if res.error: return res
+
+            if self.token_current and self.token_current.type == TOKTYPE_RPAREN:
+                break
+
+            if not (self.token_current and self.token_current.type == TOKTYPE_COMMA):
+                return res.failure(WrongSyntaxError(
+                    self.token_current.pos_start, self.token_current.pos_end,
+                    "Expected ',' between function call arguments"
+                ))
+            res.register(self.next_character())
+
+        return res.success(args)
+
+    def peek(self):
+        if self.tok_idx + 1 < len(self.tokens):
+            return self.tokens[self.tok_idx + 1]
+        return None
 
 
     def bin_op(self, func_a, ops, func_b=None):
@@ -919,7 +1076,28 @@ class Context:
 
     def get(self, var_name):
         return self.symbol_table.get(var_name)
+    
+#SYMBOL TABLE
+    
+class SymbolTable:
+    def __init__(self, parent=None):
+        self.symbols = {}
+        self.parent = parent
 
+    def get(self, name):
+        value = self.symbols.get(name, None)
+        if value is None and self.parent:
+            return self.parent.get(name)
+        return value
+
+    def set(self, name, value):
+        self.symbols[name] = value
+
+    def remove(self, name):
+        del self.symbols[name]
+
+    def __contains__(self, name):
+        return name in self.symbols or (self.parent and name in self.parent)
 
 #INTERPRETER
 
@@ -1038,8 +1216,8 @@ class Interpreter:
         res = RuntimeResult()
         
         var_name = node.var_name_tok.value
-        if var_name in context.symbol_table:
-            value = context.symbol_table[var_name]
+        if context.symbol_table.get(var_name) is not None: 
+            value = context.symbol_table.get(var_name)
             return res.success(value)
         else:
             return res.failure(RuntimeError(
@@ -1119,11 +1297,43 @@ class Interpreter:
 
         print(value) 
         return res.success(None)
+    
+    def visit_NodeFunction(self, node, context):
+        context.symbol_table.set(node.name.value, node)
+        return RuntimeResult().success(None)
 
+    def visit_NodeCall(self, node, context):
+        res = RuntimeResult()
+        func = res.register(self.visit(node.node_to_call, context))
+        if res.error: return res
+
+        if not isinstance(func, NodeFunction):
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"'{func}' is not callable"
+            ))
+
+        args = []
+        for arg_node in node.args:
+            arg_value = res.register(self.visit(arg_node, context))
+            if res.error: return res
+            args.append(arg_value)
+
+        new_context = Context(func.name.value, context, node.pos_start)
+        new_context.symbol_table = SymbolTable(new_context.parent.symbol_table)
+
+        for i, param in enumerate(func.params):
+            new_context.symbol_table.set(param.value, args[i])
+
+        return_value = res.register(self.visit(func.body, new_context))
+        if res.error: return res
+
+        return res.success(return_value if return_value is not None else Number(0))
 
 #RUN
 
 global_context = Context('<program>')
+global_context.symbol_table = SymbolTable()  
 
 def run(fn, text, context=global_context):
     lexer = Lexer(fn, text)
@@ -1131,12 +1341,14 @@ def run(fn, text, context=global_context):
 
     if error:
         return None, error
+    
     parser = Parser(tokens)
     ast = parser.parse()
     if ast.error:
         return None, ast.error
 
     interpreter = Interpreter()
+    context.symbol_table = SymbolTable(context.symbol_table) if context.symbol_table else SymbolTable() 
     result = interpreter.visit(ast.node, context)
 
     return result.value, result.error
