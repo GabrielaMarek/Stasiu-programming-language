@@ -113,7 +113,6 @@ TOKTYPE_TO         = "TO"
 TOKTYPE_STEP       = "STEP"
 TOKTYPE_WHILE      = "WHILE"
 
-
 # Symbols
 TOKTYPE_LBRACKET   = 'LBRACKET'
 TOKTYPE_RBRACKET   = 'RBRACKET'
@@ -132,8 +131,6 @@ TOKTYPE_NE         = 'NOT_EQUAL'
 TOKTYPE_AND        = 'AND'
 TOKTYPE_OR         = 'OR'
 TOKTYPE_NOT        = 'NOT'
-
-
 
 class Token:
     def __init__(self, type_, value = None, pos_start=None, pos_end=None):
@@ -413,7 +410,7 @@ class NodeString:
         self.pos_end = token.pos_end
 
     def __repr__(self):
-        return f"(String: {self.token.value})"
+        return f"NodeString({self.token.value})"
     
 class NodeConditional:
     def __init__(self, cases, default_case):
@@ -443,7 +440,15 @@ class NodeWhile:
 
     def __repr__(self):
         return f"NodeWhile(condition={self.condition}, body={self.body})"
+    
+class NodeDisplay:
+    def __init__(self, value, pos_start, pos_end):
+        self.value = value
+        self.pos_start = pos_start
+        self.pos_end = pos_end
 
+    def __repr__(self):
+        return f"NodeDisplay(value={self.value}, pos_start={self.pos_start}, pos_end={self.pos_end})"
 
 #THE RESULT OF PARSE
 
@@ -498,6 +503,9 @@ class Parser:
 
     def statement(self):
         res = ResultOfParse()
+
+        if self.token_current and self.token_current.type == TOKTYPE_DISPLAY:
+            return self.display_statement()
 
         if self.token_current and self.token_current.type == TOKTYPE_WHILE:
             return self.while_statement()
@@ -739,6 +747,33 @@ class Parser:
         if res.error: return res
 
         return res.success(NodeWhile(condition, body))
+    
+    def display_statement(self):
+        res = ResultOfParse()
+        pos_start = self.token_current.pos_start.copy()
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_DISPLAY):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'display'"
+            ))
+
+        res.register(self.next_character())
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_COLON):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end if self.token_current else pos_start,
+                "Expected ':' after 'display'"
+            ))
+
+        res.register(self.next_character())
+
+        value = res.register(self.expr())
+        if res.error:
+            return res
+
+        pos_end = value.pos_end if hasattr(value, 'pos_end') else pos_start
+        return res.success(NodeDisplay(value, pos_start, pos_end))
 
 
     def bin_op(self, func_a, ops, func_b=None):
@@ -822,7 +857,10 @@ class Number:
             raise ValueError("Unsupported operation :(")
 
     def added_to(self, other):
-        return self.operate(other, "add")
+        if isinstance(other, Number):
+            return Number(self.value + other.value, self.pos_start, other.pos_end, self.context), None
+        else:
+            return None, TypeError(f"Cannot add Number with {type(other).__name__}")
 
     def subbed_by(self, other):
         return self.operate(other, "sub")
@@ -840,11 +878,11 @@ class Number:
         return str(self.value)
     
 class String:
-    def __init__(self, value):
+    def __init__(self, value, pos_start=None, pos_end=None, context=None):
         self.value = value
-        self.pos_start = None
-        self.pos_end = None
-        self.context = None
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+        self.context = context
 
     def set_context(self, context):
         self.context = context
@@ -854,6 +892,14 @@ class String:
         self.pos_start = pos_start
         self.pos_end = pos_end
         return self
+    
+    def added_to(self, other):
+        if isinstance(other, String):
+            return String(self.value + other.value, self.pos_start, other.pos_end, self.context), None
+        elif isinstance(other, Number):
+            return String(self.value + str(other.value), self.pos_start, other.pos_end, self.context), None
+        else:
+            return None, TypeError(f"Cannot concatenate String with {type(other).__name__}")
 
     def __repr__(self):
         return f'"{self.value}"'
@@ -985,7 +1031,7 @@ class Interpreter:
     
     def visit_NodeString(self, node, context):
         return RuntimeResult().success(
-            String(node.token.value).set_context(context).set_pos(node.pos_start, node.pos_end)
+            String(node.token.value, node.pos_start, node.pos_end, context)
         )
 
     def visit_NodeVariable(self, node, context):
@@ -1063,6 +1109,15 @@ class Interpreter:
             if res.error: 
                 return res
 
+        return res.success(None)
+    
+    def visit_NodeDisplay(self, node, context):
+        res = RuntimeResult()
+        value = res.register(self.visit(node.value, context))
+        if res.error: 
+            return res
+
+        print(value) 
         return res.success(None)
 
 
