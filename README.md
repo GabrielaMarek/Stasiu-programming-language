@@ -1,6 +1,8 @@
 A Python-based interpreter for a custom educational programming language designed to introduce fundamental programming concepts with user-friendly syntax and helpful error messages.
 
-My programming language is almost done—just needs a couple more days to be fully finished. Right now, the parser has print statements for debugging, helping me track its behavior.
+My programming language is almost done—just needs a couple more days to be fully finished. I plan on making it executable not in the command line but in an external file. I want to add also functions.
+
+Right now, the parser has print statements for debugging, helping me track its behavior.
 
 To open it, you have to run shell.py
 
