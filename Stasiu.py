@@ -536,6 +536,16 @@ class NodeAsk:
 
     def __repr__(self):
         return f"Ask: {self.prompt_expr} -> {self.var_name_tok.value}"
+    
+class NodeFunctionCall:
+    def __init__(self, func_name_tok, args, pos_start, pos_end):
+        self.func_name_tok = func_name_tok
+        self.args = args
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"{self.func_name_tok.value}({', '.join(map(str, self.args))})"
 
 #THE RESULT OF PARSE
 
@@ -607,22 +617,6 @@ class Parser:
         if self.token_current and self.token_current.type == TOKTYPE_WHEN:
             return self.conditional()
 
-        if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
-            var_name = self.token_current
-            res.register(self.next_character())
-
-            if self.token_current and self.token_current.type == TOKTYPE_EQUALS:
-                res.register(self.next_character())
-                expr = res.register(self.expr())
-                if res.error:
-                    return res
-                return res.success(NodeAssign(var_name, expr))
-
-            return res.failure(WrongSyntaxError(
-                var_name.pos_start, var_name.pos_end,
-                "Expected '=' after variable name"
-            ))
-        
         if self.token_current and self.token_current.type == TOKTYPE_CREATE:
             return self.create_statement()
         
@@ -634,6 +628,17 @@ class Parser:
         
         if self.token_current and self.token_current.type == TOKTYPE_ASK:
             return self.parse_ask_statement()
+
+        if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
+            next_tok = self.peek()
+            if next_tok and next_tok.type == TOKTYPE_EQUALS:
+                var_name = self.token_current
+                res.register(self.next_character())  
+                res.register(self.next_character())  
+                expr = res.register(self.expr())
+                if res.error:
+                    return res
+                return res.success(NodeAssign(var_name, expr))
 
         return self.expr()
 
@@ -701,9 +706,32 @@ class Parser:
             return res.success(NodeString(tok))
 
         if tok.type == TOKTYPE_IDENTIFIER:
-            var_name_tok = tok  
-            res.register(self.next_character()) 
+            var_name_tok = tok
+            res.register(self.next_character())
 
+            if self.token_current and self.token_current.type == TOKTYPE_LPAREN:
+                res.register(self.next_character())
+                args = []
+                closing_paren_pos = None  
+
+                if self.token_current.type == TOKTYPE_RPAREN:
+                    closing_paren_pos = self.token_current.pos_end
+                    res.register(self.next_character())
+                else:
+                    args.append(res.register(self.expr()))
+                    while self.token_current and self.token_current.type == TOKTYPE_COMMA:
+                        res.register(self.next_character())
+                        args.append(res.register(self.expr()))
+                    if self.token_current.type != TOKTYPE_RPAREN:
+                        return res.failure(WrongSyntaxError(
+                            self.token_current.pos_start, self.token_current.pos_end,
+                            "Expected ')' after arguments"
+                        ))
+                    closing_paren_pos = self.token_current.pos_end
+                    res.register(self.next_character())
+
+                return res.success(NodeFunctionCall(var_name_tok, args, var_name_tok.pos_start, closing_paren_pos))
+            
             if self.token_current and self.token_current.type == TOKTYPE_LBRACKET:
                 res.register(self.next_character())  
                 if not self.token_current:
@@ -1098,8 +1126,52 @@ class Parser:
                 return res
             left = NodeBinaryOp(left, op_tok, right)
 
-        return res.success(left)
+        return res.success(left)    
 
+#BUILT IN FUNCTIONS
+
+class BuiltInFunction:
+    def __init__(self, func):
+        self.func = func
+        self.arg_names = func.arg_names
+
+    def execute(self, exec_ctx):
+        return self.func(exec_ctx)
+
+def execute_run(exec_ctx):
+    res = RuntimeResult()
+    fn = exec_ctx.symbol_table.get("fn")  
+
+    if not isinstance(fn, String):
+        return res.failure(RuntimeError(
+            fn.pos_start if fn else None,
+            fn.pos_end if fn else None,
+            "Argument must be a string",
+            exec_ctx
+        ))
+
+    try:
+        with open(fn.value, "r") as f:
+            script = f.read()
+    except Exception as e:
+        return res.failure(RuntimeError(
+            fn.pos_start,
+            fn.pos_end,
+            f"Failed to load script '{fn.value}': {str(e)}",
+            exec_ctx
+        ))
+
+    _, error = run(fn.value, script, exec_ctx)
+    if error:
+        return res.failure(RuntimeError(
+            error.pos_start,
+            error.pos_end,
+            f"Error executing script: {error.details}\n{error.generate_traceback()}",
+            exec_ctx
+        ))
+
+    return res.success(Number.null)
+execute_run.arg_names = ["fn"]
 
 #RESULT OF RUNTIME
 
@@ -1112,7 +1184,6 @@ class RuntimeResult:
         if res.error: self.error = res.error
         return res.value
     
-
     def success(self, value):
         self.value = value
         return self
@@ -1123,7 +1194,7 @@ class RuntimeResult:
 
 #VALUES
 class Number:
-    def __init__(self, value: float, pos_start=None, pos_end=None, context=None):
+    def __init__(self, value, pos_start=None, pos_end=None, context=None):
         self.value = value
         self.pos_start = pos_start
         self.pos_end = pos_end
@@ -1183,6 +1254,8 @@ class Number:
 
     def __repr__(self):
         return str(self.value)
+    
+Number.null = Number(0)
     
 class String:
     def __init__(self, value, pos_start=None, pos_end=None, context=None):
@@ -1636,10 +1709,54 @@ class Interpreter:
         context.set(var_name, String(user_input).set_context(context))
         
         return res.success(None)
+    
+    def visit_NodeFunctionCall(self, node, context):
+        res = RuntimeResult()
+        args = []
+        func_name = node.func_name_tok.value
+        func = context.get(func_name)
+
+        if not func:
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"Function '{func_name}' not defined",
+                context
+            ))
+
+        for arg_node in node.args:
+            arg = res.register(self.visit(arg_node, context))
+            if res.error: return res
+            args.append(arg)
+
+        if isinstance(func, BuiltInFunction):
+            exec_ctx = Context(func_name, parent=context)
+            
+            expected_args = len(func.arg_names)
+            if len(args) != expected_args:
+                return res.failure(RuntimeError(
+                    node.pos_start, node.pos_end,
+                    f"Expected {expected_args} args, got {len(args)}",
+                    context
+                ))
+            
+            for i in range(expected_args):
+                arg_name = func.arg_names[i]
+                exec_ctx.set(arg_name, args[i])
+            
+            return_value = res.register(func.execute(exec_ctx))
+            if res.error: return res
+            return res.success(return_value)
+        else:
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"'{func_name}' is not a built-in function",
+                context
+        ))
 
 #RUN
 
 global_context = Context('<program>')
+global_context.set("run", BuiltInFunction(execute_run))
 
 def run(fn, text, context=global_context):
     lexer = Lexer(fn, text)
@@ -1656,3 +1773,4 @@ def run(fn, text, context=global_context):
     result = interpreter.visit(ast.node, context)
 
     return result.value, result.error
+
