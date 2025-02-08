@@ -108,10 +108,12 @@ TOKTYPE_REPEAT     = "REPEAT"
 TOKTYPE_FROM       = "FROM"
 TOKTYPE_TO         = "TO"
 TOKTYPE_STEP       = "STEP"
-TOKTYPE_TIMES       = 'TIMES'
-TOKTYPE_ADD = 'ADD'
-TOKTYPE_REMOVE = 'REMOVE'
-TOKTYPE_INDEX = 'INDEX'
+TOKTYPE_TIMES      = 'TIMES'
+TOKTYPE_ADD        = 'ADD'
+TOKTYPE_REMOVE     = 'REMOVE'
+TOKTYPE_INDEX      = 'INDEX'
+TOKTYPE_ASK        = 'ASK'
+TOKTYPE_SAVE       = 'SAVE'
 
 # Symbols
 TOKTYPE_LBRACKET   = 'LBRACKET'
@@ -225,7 +227,9 @@ class Lexer:
             'times': TOKTYPE_TIMES,
             'add': TOKTYPE_ADD,
             'remove': TOKTYPE_REMOVE,
-            'index': TOKTYPE_INDEX
+            'index': TOKTYPE_INDEX,
+            'ask': TOKTYPE_ASK,
+            'save': TOKTYPE_SAVE
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -522,6 +526,16 @@ class NodeRemoveFromList:
             return f"Remove index {self.index_expr} from {self.list_name_tok.value}"
         else:
             return f"Remove {self.value_expr} from {self.list_name_tok.value}"
+        
+class NodeAsk:
+    def __init__(self, prompt_expr, var_name_tok, pos_start, pos_end):
+        self.prompt_expr = prompt_expr
+        self.var_name_tok = var_name_tok
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"Ask: {self.prompt_expr} -> {self.var_name_tok.value}"
 
 #THE RESULT OF PARSE
 
@@ -617,6 +631,9 @@ class Parser:
         
         if self.token_current and self.token_current.type == TOKTYPE_REMOVE:
             return self.remove_statement()
+        
+        if self.token_current and self.token_current.type == TOKTYPE_ASK:
+            return self.parse_ask_statement()
 
         return self.expr()
 
@@ -904,31 +921,6 @@ class Parser:
 
         return res.success(NodeRepeatTimes(times_expr, body))
     
-    def while_statement(self):
-        res = ResultOfParse()
-
-        if not (self.token_current and self.token_current.type == TOKTYPE_WHILE):
-            return res.failure(WrongSyntaxError(
-                self.token_current.pos_start, self.token_current.pos_end,
-                "Expected 'while'"
-            ))
-
-        res.register(self.next_character())
-
-        condition = res.register(self.expr())
-        if res.error: return res
-
-        if not (self.token_current and self.token_current.type == TOKTYPE_THEN):
-            return res.failure(WrongSyntaxError(
-                self.token_current.pos_start, self.token_current.pos_end,
-                "Expected 'then' after while condition"
-            ))
-
-        res.register(self.next_character())
-        body = res.register(self.statement())
-        if res.error: return res
-
-        return res.success(NodeWhile(condition, body))
     
     def display_statement(self):
         res = ResultOfParse()
@@ -1039,8 +1031,54 @@ class Parser:
         else:
             return res.success(NodeRemoveFromList(list_name_tok, value_expr=value_expr, 
                                                 pos_start=pos_start, pos_end=list_name_tok.pos_end))
-
-
+        
+        
+    def parse_ask_statement(self):
+        res = ResultOfParse()
+        pos_start = self.token_current.pos_start.copy()
+        
+        res.register(self.next_character())  
+        
+        if self.token_current.type != TOKTYPE_COLON:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected ':' after 'ask'"
+            ))
+        res.register(self.next_character())
+        
+        prompt_expr = res.register(self.expr())
+        if res.error: return res
+        
+        if self.token_current.type != TOKTYPE_THEN:  
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'then' after prompt"
+            ))
+        res.register(self.next_character())
+        
+        if self.token_current.type != TOKTYPE_SAVE: 
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'save' after 'then'"
+            ))
+        res.register(self.next_character())
+        
+        if self.token_current.type != TOKTYPE_TO:  
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'to' after 'save'"
+            ))
+        res.register(self.next_character())
+        
+        if self.token_current.type != TOKTYPE_IDENTIFIER:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected variable name after 'to'"
+            ))
+        var_name_tok = self.token_current
+        res.register(self.next_character())
+        
+        return res.success(NodeAsk(prompt_expr, var_name_tok, pos_start, var_name_tok.pos_end))
 
     def bin_op(self, func_a, ops, func_b=None):
         if func_b is None:
@@ -1569,6 +1607,33 @@ class Interpreter:
                     node.value_expr.pos_start, node.value_expr.pos_end,
                     f"Value {value} not found in list", context
                 ))
+        
+        return res.success(None)
+    
+    def visit_NodeAsk(self, node, context):
+        res = RuntimeResult()
+        
+        prompt = res.register(self.visit(node.prompt_expr, context))
+        if res.error: return res
+        
+        if not isinstance(prompt, String):
+            return res.failure(RuntimeError(
+                node.prompt_expr.pos_start, node.prompt_expr.pos_end,
+                "Prompt must be a string",
+                context
+            ))
+        
+        try:
+            user_input = input(prompt.value)
+        except:
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                "Failed to read input",
+                context
+            ))
+        
+        var_name = node.var_name_tok.value
+        context.set(var_name, String(user_input).set_context(context))
         
         return res.success(None)
 
