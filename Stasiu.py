@@ -457,6 +457,25 @@ class NodeRepeatTimes:
 
     def __repr__(self):
         return f"(Repeat {self.times_expr} times: {self.body})"
+    
+class NodeList:
+    def __init__(self, elements, pos_start, pos_end):
+        self.elements = elements
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"[{', '.join(map(str, self.elements))}]"
+    
+class NodeSubscript:
+    def __init__(self, var_name_tok, index_expr, pos_start, pos_end):
+        self.var_name_tok = var_name_tok
+        self.index_expr = index_expr
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"{self.var_name_tok.value}[{self.index_expr}]"
 
 #THE RESULT OF PARSE
 
@@ -546,6 +565,9 @@ class Parser:
                 var_name.pos_start, var_name.pos_end,
                 "Expected '=' after variable name"
             ))
+        
+        if self.token_current and self.token_current.type == TOKTYPE_CREATE:
+            return self.create_statement()
 
         return self.expr()
 
@@ -613,8 +635,40 @@ class Parser:
             return res.success(NodeString(tok))
 
         if tok.type == TOKTYPE_IDENTIFIER:
-            res.register(self.next_character())
-            return res.success(NodeVariable(tok))
+            var_name_tok = tok  
+            res.register(self.next_character()) 
+
+            if self.token_current and self.token_current.type == TOKTYPE_LBRACKET:
+                res.register(self.next_character())  
+                if not self.token_current:
+                    return res.failure(WrongSyntaxError(
+                        var_name_tok.pos_start, var_name_tok.pos_end,
+                        "Unexpected end of input after '['"
+                    ))
+
+                index_expr = res.register(self.expr())  
+                if res.error:
+                    return res  
+
+                if not self.token_current or self.token_current.type != TOKTYPE_RBRACKET:
+                    return res.failure(WrongSyntaxError(
+                        self.token_current.pos_start if self.token_current else var_name_tok.pos_start,
+                        self.token_current.pos_end if self.token_current else var_name_tok.pos_end,
+                        "Expected ']' after subscript index"
+                    ))
+
+                closing_bracket = self.token_current  
+                res.register(self.next_character())  
+
+                if closing_bracket is None:
+                    return res.failure(WrongSyntaxError(
+                        var_name_tok.pos_start, index_expr.pos_end,
+                        "Unexpected end of input after subscript"
+                    ))
+
+                return res.success(NodeSubscript(var_name_tok, index_expr, var_name_tok.pos_start, closing_bracket.pos_end))
+
+            return res.success(NodeVariable(var_name_tok))  
 
         if tok.type == TOKTYPE_LPAREN:
             res.register(self.next_character())
@@ -627,12 +681,44 @@ class Parser:
                 tok.pos_start, tok.pos_end,
                 f"Expected ')' after the expression at position {tok.pos_end}"
             ))
+        
+        if tok.type == TOKTYPE_LBRACKET:
+            elements = []
+            pos_start = tok.pos_start.copy()
+            res.register(self.next_character()) 
 
+            if self.token_current and self.token_current.type == TOKTYPE_RBRACKET:
+                res.register(self.next_character())  
+                return res.success(NodeList(elements, pos_start, self.token_current.pos_end.copy()))
+            
+            expr = res.register(self.expr())
+            if res.error: return res
+            elements.append(expr)
+
+            while self.token_current and self.token_current.type == TOKTYPE_COMMA:
+                res.register(self.next_character()) 
+                expr = res.register(self.expr())
+                if res.error: return res
+                elements.append(expr)
+
+            if not (self.token_current and self.token_current.type == TOKTYPE_RBRACKET):
+                return res.failure(WrongSyntaxError(
+                    self.token_current.pos_start if self.token_current else pos_start,
+                    self.token_current.pos_end if self.token_current else pos_start,
+                    "Expected ']' after list elements"
+                ))
+            
+            pos_end = self.token_current.pos_end.copy()
+            res.register(self.next_character())  
+            return res.success(NodeList(elements, pos_start, pos_end))
+
+
+            
         return res.failure(WrongSyntaxError(
-            tok.pos_start, tok.pos_end,
-            f"Unexpected token: '{tok.value}'"
-        ))
-    
+                        tok.pos_start, tok.pos_end,
+                        f"Unexpected token: '{tok.value}'"
+                    ))
+            
 
     def conditional(self):
         res = ResultOfParse()
@@ -821,6 +907,27 @@ class Parser:
 
         pos_end = value.pos_end if hasattr(value, 'pos_end') else pos_start
         return res.success(NodeDisplay(value, pos_start, pos_end))
+    
+    def create_statement(self):
+        res = ResultOfParse()
+        create_tok = self.token_current
+        res.register(self.next_character())
+        if self.token_current.type != TOKTYPE_IDENTIFIER:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected identifier after 'create'"
+            ))
+        var_name = self.token_current
+        res.register(self.next_character())
+        if self.token_current.type != TOKTYPE_EQUALS:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected '=' after identifier in 'create'"
+            ))
+        res.register(self.next_character())
+        expr = res.register(self.expr())
+        if res.error: return res
+        return res.success(NodeAssign(var_name, expr))
 
 
     def bin_op(self, func_a, ops, func_b=None):
@@ -951,6 +1058,26 @@ class String:
     def __repr__(self):
         return f'"{self.value}"'
 
+#LIST
+
+class List:
+    def __init__(self, elements, pos_start=None, pos_end=None, context=None):
+        self.elements = elements
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+        self.context = context
+
+    def set_context(self, context):
+        self.context = context
+        return self
+
+    def set_pos(self, pos_start, pos_end):
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+        return self
+
+    def __repr__(self):
+        return f'[{", ".join(map(str, self.elements))}]'
     
 #CONTEXT
 
@@ -1215,7 +1342,44 @@ class Interpreter:
                 return res
 
         return res.success(None)
-
+    
+    def visit_NodeList(self, node, context):
+        res = RuntimeResult()
+        elements = []
+        for element_node in node.elements:
+            element = res.register(self.visit(element_node, context))
+            if res.error: return res
+            elements.append(element)
+        return res.success(List(elements, node.pos_start, node.pos_end, context))
+    
+    def visit_NodeSubscript(self, node, context):
+        res = RuntimeResult()
+        var_name = node.var_name_tok.value
+        list_val = context.get(var_name)
+        if not list_val:
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"Undefined variable '{var_name}'", context
+            ))
+        if not isinstance(list_val, List):
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"'{var_name}' is not a list", context
+            ))
+        index = res.register(self.visit(node.index_expr, context))
+        if res.error: return res
+        if not isinstance(index, Number) or not index.value.is_integer():
+            return res.failure(RuntimeError(
+                node.index_expr.pos_start, node.index_expr.pos_end,
+                "List index must be an integer", context
+            ))
+        idx = int(index.value)
+        if idx < 0 or idx >= len(list_val.elements):
+            return res.failure(RuntimeError(
+                node.index_expr.pos_start, node.index_expr.pos_end,
+                f"Index {idx} out of range", context
+            ))
+        return res.success(list_val.elements[idx])
 
 #RUN
 
