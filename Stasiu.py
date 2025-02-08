@@ -102,15 +102,16 @@ TOKTYPE_THEN       = "THEN"
 TOKTYPE_REPEAT     = 'REPEAT'
 TOKTYPE_CREATE     = 'CREATE'
 TOKTYPE_GIVE       = 'GIVE'
-TOKTYPE_ASK        = 'ASK'
 TOKTYPE_SET        = 'SET'
 TOKTYPE_TO         = 'TO'
 TOKTYPE_REPEAT     = "REPEAT"
 TOKTYPE_FROM       = "FROM"
 TOKTYPE_TO         = "TO"
 TOKTYPE_STEP       = "STEP"
-TOKTYPE_WHILE      = "WHILE"
 TOKTYPE_TIMES       = 'TIMES'
+TOKTYPE_ADD = 'ADD'
+TOKTYPE_REMOVE = 'REMOVE'
+TOKTYPE_INDEX = 'INDEX'
 
 # Symbols
 TOKTYPE_LBRACKET   = 'LBRACKET'
@@ -213,7 +214,6 @@ class Lexer:
             'repeat': TOKTYPE_REPEAT,
             'create': TOKTYPE_CREATE,
             'give': TOKTYPE_GIVE,
-            'ask': TOKTYPE_ASK,
             'set': TOKTYPE_SET,
             'to': TOKTYPE_TO,
             'then': TOKTYPE_THEN,  
@@ -222,8 +222,10 @@ class Lexer:
             'not': TOKTYPE_NOT,
             'from': TOKTYPE_FROM,
             'step': TOKTYPE_STEP,
-            'while': TOKTYPE_WHILE,
-            'times': TOKTYPE_TIMES
+            'times': TOKTYPE_TIMES,
+            'add': TOKTYPE_ADD,
+            'remove': TOKTYPE_REMOVE,
+            'index': TOKTYPE_INDEX
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -496,6 +498,30 @@ class NodeSubscript:
 
     def __repr__(self):
         return f"{self.var_name_tok.value}[{self.index_expr}]"
+    
+class NodeAddToList:
+    def __init__(self, list_name_tok, value_expr, pos_start, pos_end):
+        self.list_name_tok = list_name_tok
+        self.value_expr = value_expr
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        return f"Add {self.value_expr} to {self.list_name_tok.value}"
+
+class NodeRemoveFromList:
+    def __init__(self, list_name_tok, value_expr=None, index_expr=None, pos_start=None, pos_end=None):
+        self.list_name_tok = list_name_tok
+        self.value_expr = value_expr
+        self.index_expr = index_expr
+        self.pos_start = pos_start
+        self.pos_end = pos_end
+
+    def __repr__(self):
+        if self.index_expr is not None:
+            return f"Remove index {self.index_expr} from {self.list_name_tok.value}"
+        else:
+            return f"Remove {self.value_expr} from {self.list_name_tok.value}"
 
 #THE RESULT OF PARSE
 
@@ -560,9 +586,6 @@ class Parser:
 
         if self.token_current and self.token_current.type == TOKTYPE_DISPLAY:
             return self.display_statement()
-
-        if self.token_current and self.token_current.type == TOKTYPE_WHILE:
-            return self.while_statement()
         
         if self.token_current and self.token_current.type == TOKTYPE_REPEAT:
             return self.repeat_statement()
@@ -588,6 +611,12 @@ class Parser:
         
         if self.token_current and self.token_current.type == TOKTYPE_CREATE:
             return self.create_statement()
+        
+        if self.token_current and self.token_current.type == TOKTYPE_ADD:
+            return self.add_statement()
+        
+        if self.token_current and self.token_current.type == TOKTYPE_REMOVE:
+            return self.remove_statement()
 
         return self.expr()
 
@@ -948,6 +977,69 @@ class Parser:
         expr = res.register(self.expr())
         if res.error: return res
         return res.success(NodeAssign(var_name, expr))
+    
+    def add_statement(self):
+        res = ResultOfParse()
+        pos_start = self.token_current.pos_start.copy()
+        res.register(self.next_character())  
+        
+        value_expr = res.register(self.expr())
+        if res.error: return res
+        
+        if self.token_current.type != TOKTYPE_TO:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'to' after value"
+            ))
+        res.register(self.next_character())
+        
+        if self.token_current.type != TOKTYPE_IDENTIFIER:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected list name after 'to'"
+            ))
+        list_name_tok = self.token_current
+        res.register(self.next_character())
+        
+        return res.success(NodeAddToList(list_name_tok, value_expr, pos_start, list_name_tok.pos_end))
+
+    def remove_statement(self):
+        res = ResultOfParse()
+        pos_start = self.token_current.pos_start.copy()
+        res.register(self.next_character())  
+        
+        by_index = False
+        if self.token_current and self.token_current.type == TOKTYPE_INDEX:
+            by_index = True
+            res.register(self.next_character()) 
+            index_expr = res.register(self.expr())
+            if res.error: return res
+        else:
+            value_expr = res.register(self.expr())
+            if res.error: return res
+        
+        if self.token_current.type != TOKTYPE_FROM:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected 'from' after value/index"
+            ))
+        res.register(self.next_character())
+        
+        if self.token_current.type != TOKTYPE_IDENTIFIER:
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start, self.token_current.pos_end,
+                "Expected list name after 'from'"
+            ))
+        list_name_tok = self.token_current
+        res.register(self.next_character())
+        
+        if by_index:
+            return res.success(NodeRemoveFromList(list_name_tok, index_expr=index_expr, 
+                                                pos_start=pos_start, pos_end=list_name_tok.pos_end))
+        else:
+            return res.success(NodeRemoveFromList(list_name_tok, value_expr=value_expr, 
+                                                pos_start=pos_start, pos_end=list_name_tok.pos_end))
+
 
 
     def bin_op(self, func_a, ops, func_b=None):
@@ -1047,6 +1139,9 @@ class Number:
     
     def powed_by(self, other):
         return self.operate(other, "pow")
+    
+    def __eq__(self, other):
+        return isinstance(other, Number) and self.value == other.value
 
     def __repr__(self):
         return str(self.value)
@@ -1074,7 +1169,10 @@ class String:
             return String(self.value + str(other.value), self.pos_start, other.pos_end, self.context), None
         else:
             return None, TypeError(f"Cannot concatenate String with {type(other).__name__}")
-
+        
+    def __eq__(self, other):
+        return isinstance(other, String) and self.value == other.value
+   
     def __repr__(self):
         return f'"{self.value}"'
 
@@ -1095,6 +1193,9 @@ class List:
         self.pos_start = pos_start
         self.pos_end = pos_end
         return self
+    
+    def __eq__(self, other):
+        return isinstance(other, List) and self.elements == other.elements
 
     def __repr__(self):
         return f'[{", ".join(map(str, self.elements))}]'
@@ -1400,6 +1501,76 @@ class Interpreter:
                 f"Index {idx} out of range", context
             ))
         return res.success(list_val.elements[idx])
+    
+    def visit_NodeAddToList(self, node, context):
+        res = RuntimeResult()
+        list_name = node.list_name_tok.value
+        list_val = context.get(list_name)
+        
+        if not list_val:
+            return res.failure(RuntimeError(
+                node.list_name_tok.pos_start, node.list_name_tok.pos_end,
+                f"List '{list_name}' not defined", context
+            ))
+        if not isinstance(list_val, List):
+            return res.failure(RuntimeError(
+                node.list_name_tok.pos_start, node.list_name_tok.pos_end,
+                f"'{list_name}' is not a list", context
+            ))
+        
+        value = res.register(self.visit(node.value_expr, context))
+        if res.error: return res
+        
+        list_val.elements.append(value)
+        return res.success(None)
+
+    def visit_NodeRemoveFromList(self, node, context):
+        res = RuntimeResult()
+        list_name = node.list_name_tok.value
+        list_val = context.get(list_name)
+        
+        if not list_val:
+            return res.failure(RuntimeError(
+                node.list_name_tok.pos_start, node.list_name_tok.pos_end,
+                f"List '{list_name}' not defined", context
+            ))
+        if not isinstance(list_val, List):
+            return res.failure(RuntimeError(
+                node.list_name_tok.pos_start, node.list_name_tok.pos_end,
+                f"'{list_name}' is not a list", context
+            ))
+        
+        if node.index_expr:
+            index = res.register(self.visit(node.index_expr, context))
+            if res.error: return res
+            
+            if not isinstance(index, Number) or not index.value.is_integer():
+                return res.failure(RuntimeError(
+                    node.index_expr.pos_start, node.index_expr.pos_end,
+                    "Index must be an integer", context
+                ))
+            
+            idx = int(index.value)
+            if idx < 0 or idx >= len(list_val.elements):
+                return res.failure(RuntimeError(
+                    node.index_expr.pos_start, node.index_expr.pos_end,
+                    f"Index {idx} out of range", context
+                ))
+            
+            list_val.elements.pop(idx)
+        else:
+            value = res.register(self.visit(node.value_expr, context))
+            if res.error: return res
+            
+            try:
+                list_val.elements.remove(value)
+            except ValueError:
+                return res.failure(RuntimeError(
+                    node.value_expr.pos_start, node.value_expr.pos_end,
+                    f"Value {value} not found in list", context
+                ))
+        
+        return res.success(None)
 
 #RUN
 
