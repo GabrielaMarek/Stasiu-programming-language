@@ -103,14 +103,14 @@ TOKTYPE_REPEAT     = 'REPEAT'
 TOKTYPE_CREATE     = 'CREATE'
 TOKTYPE_GIVE       = 'GIVE'
 TOKTYPE_ASK        = 'ASK'
-TOKTYPE_END        = 'END'
-TOKTYPE_START      = 'START'
 TOKTYPE_SET        = 'SET'
 TOKTYPE_TO         = 'TO'
 TOKTYPE_REPEAT     = "REPEAT"
 TOKTYPE_FROM       = "FROM"
+TOKTYPE_TO         = "TO"
 TOKTYPE_STEP       = "STEP"
 TOKTYPE_WHILE      = "WHILE"
+TOKTYPE_TIMES       = 'TIMES'
 
 # Symbols
 TOKTYPE_LBRACKET   = 'LBRACKET'
@@ -214,8 +214,6 @@ class Lexer:
             'create': TOKTYPE_CREATE,
             'give': TOKTYPE_GIVE,
             'ask': TOKTYPE_ASK,
-            'start': TOKTYPE_START,
-            'end': TOKTYPE_END,
             'set': TOKTYPE_SET,
             'to': TOKTYPE_TO,
             'then': TOKTYPE_THEN,  
@@ -224,7 +222,8 @@ class Lexer:
             'not': TOKTYPE_NOT,
             'from': TOKTYPE_FROM,
             'step': TOKTYPE_STEP,
-            'while': TOKTYPE_WHILE
+            'while': TOKTYPE_WHILE,
+            'times': TOKTYPE_TIMES
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
         return Token(token_type, identifier_str if token_type == TOKTYPE_IDENTIFIER else None, pos_start, self.pos.copy())
@@ -237,11 +236,8 @@ class Lexer:
         escape_characters = {'n': '\n', 't': '\t', '"': '"', '\\': '\\'}
 
         while self.character_current:
-            if self.character_current != '"':
-                return None, CharacterFormatError(
-                    pos_start, self.pos, 
-                    "Unclosed string literal. Add closing \" to terminate the string."
-                ) 
+            if self.character_current == '"':  
+                break
             if self.character_current == '\\':  
                 self.next_character()
                 if self.character_current in escape_characters:
@@ -252,10 +248,10 @@ class Lexer:
                 string_value += self.character_current
             self.next_character()
 
-        if self.character_current != '"':
-            return None, CharacterFormatError(pos_start, self.pos, "Unterminated string")
-        self.next_character()
-        return Token(TOKTYPE_STRING, string_value, pos_start, self.pos.copy()), None
+        if self.character_current != '"':  
+            return [], CharacterFormatError(pos_start, self.pos, "Unterminated string")
+        self.next_character() 
+        return Token(TOKTYPE_STRING, string_value, pos_start, self.pos.copy())
 
 
     def make_tokens(self):
@@ -323,18 +319,12 @@ class Lexer:
                 else:
                     tokens.append(Token(TOKTYPE_GT, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '"':
-                token, error = self.make_string()
-                if error:
-                    return tokens, error
-                tokens.append(token)
+                tokens.append(self.make_string())
             else:
                 pos_start = self.pos.copy()
                 char = self.character_current
                 self.next_character()
-                return [], CharacterFormatError(
-                    pos_start, self.pos, 
-                    f"Unexpected character '{char}'. Only valid symbols and operators are allowed."
-                )
+                return [], CharacterFormatError(pos_start, self.pos, f"'{char}'")
 
         return tokens, None
     
@@ -457,6 +447,16 @@ class NodeDisplay:
 
     def __repr__(self):
         return f"NodeDisplay(value={self.value}, pos_start={self.pos_start}, pos_end={self.pos_end})"
+    
+class NodeRepeatTimes:
+    def __init__(self, times_expr, body):
+        self.times_expr = times_expr
+        self.body = body
+        self.pos_start = times_expr.pos_start
+        self.pos_end = body.pos_end
+
+    def __repr__(self):
+        return f"(Repeat {self.times_expr} times: {self.body})"
 
 #THE RESULT OF PARSE
 
@@ -499,6 +499,13 @@ class Parser:
             self.token_current = None
         print(f"next_character: Current token is now {self.token_current}")
         return self.token_current
+    
+    def peek(self):
+        peek_idx = self.tok_idx + 1
+        if peek_idx < len(self.tokens):
+            return self.tokens[peek_idx]
+        else:
+            return None
 
     def parse(self):
         res = self.statement()
@@ -537,7 +544,7 @@ class Parser:
 
             return res.failure(WrongSyntaxError(
                 var_name.pos_start, var_name.pos_end,
-                "Missing equals sign (=) after variable name for assignment"
+                "Expected '=' after variable name"
             ))
 
         return self.expr()
@@ -622,9 +629,10 @@ class Parser:
             ))
 
         return res.failure(WrongSyntaxError(
-                tok.pos_start, tok.pos_end,
-                f"Unexpected {tok.value!r} in expression. Expected value or parenthesized expression."
-            ))
+            tok.pos_start, tok.pos_end,
+            f"Unexpected token: '{tok.value}'"
+        ))
+    
 
     def conditional(self):
         res = ResultOfParse()
@@ -685,53 +693,81 @@ class Parser:
         res = ResultOfParse()
         pos_start = self.token_current.pos_start.copy()
 
-        if self.token_current.type != TOKTYPE_REPEAT:
-            return res.failure(...)
         res.register(self.next_character())
 
-        if self.token_current.type != TOKTYPE_IDENTIFIER:
-            return res.failure(...)
-        var_name_tok = self.token_current
+        if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
+            var_name_tok = self.token_current
+            saved_idx = self.tok_idx
+            next_tok = self.peek()
+            
+            print(f"DEBUG: Found identifier {var_name_tok}, next token = {next_tok}")
+
+            if next_tok and next_tok.type == TOKTYPE_FROM:
+                res.register(self.next_character())  
+                res.register(self.next_character())  
+
+                start_expr = res.register(self.expr())
+                if res.error: return res
+
+                if not (self.token_current and self.token_current.type == TOKTYPE_TO):
+                    return res.failure(WrongSyntaxError(
+                        self.token_current.pos_start if self.token_current else pos_start,
+                        self.token_current.pos_end if self.token_current else pos_start,
+                        "Expected 'to' after start value"
+                    ))
+                res.register(self.next_character())
+
+                end_expr = res.register(self.expr())
+                if res.error: return res
+
+                step_expr = NodeNumber(Token(TOKTYPE_NUMBER, 1, pos_start=pos_start, pos_end=pos_start))
+                if self.token_current and self.token_current.type == TOKTYPE_STEP:
+                    res.register(self.next_character())
+                    step_expr = res.register(self.expr())
+                    if res.error: return res
+
+                if not (self.token_current and self.token_current.type == TOKTYPE_COLON):
+                    return res.failure(WrongSyntaxError(
+                        self.token_current.pos_start if self.token_current else pos_start,
+                        self.token_current.pos_end if self.token_current else pos_start,
+                        "Expected ':' after loop parameters"
+                    ))
+                res.register(self.next_character())
+
+                body = res.register(self.statement())
+                if res.error: return res
+
+                return res.success(NodeRepeat(
+                    var_name_tok, 
+                    start_expr,
+                    end_expr,
+                    step_expr,
+                    body
+                ))
+
+        times_expr = res.register(self.expr())
+        if res.error: return res
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_TIMES):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start if self.token_current else pos_start,
+                self.token_current.pos_end if self.token_current else pos_start,
+                "Expected 'times' after repetition count"
+            ))
         res.register(self.next_character())
 
-        if not (self.token_current and self.token_current.type == TOKTYPE_FROM):
+        if not (self.token_current and self.token_current.type == TOKTYPE_COLON):
             return res.failure(WrongSyntaxError(
-                self.token_current.pos_start, self.token_current.pos_end,
-                "Expected 'from'"
+                self.token_current.pos_start,
+                self.token_current.pos_end,
+                "Expected ':' after 'times'"
             ))
-
-        res.register(self.next_character())  
-        start_value = res.register(self.expr())
-        if res.error:
-            return res
-
-        if not (self.token_current and self.token_current.type == TOKTYPE_TO):
-            return res.failure(WrongSyntaxError(
-                self.token_current.pos_start, self.token_current.pos_end,
-                "Expected 'to'"
-            ))
-
-        res.register(self.next_character())  
-        end_value = res.register(self.expr())
-        if res.error:
-            return res
-
-        step_value = None
-        if self.token_current and self.token_current.type == TOKTYPE_STEP:
-            res.register(self.next_character())  
-            step_value = res.register(self.expr())
-            if res.error:
-                return res
+        res.register(self.next_character())
 
         body = res.register(self.statement())
-        if res.error:
-            return res
+        if res.error: return res
 
-        if step_value is None:
-            step_value = NodeNumber(Token(TOKTYPE_NUMBER, 1)) 
-
-        return res.success(NodeRepeat(var_name_tok.value, start_value, end_value, step_value, body))
-
+        return res.success(NodeRepeatTimes(times_expr, body))
     
     def while_statement(self):
         res = ResultOfParse()
@@ -870,44 +906,20 @@ class Number:
     def added_to(self, other):
         if isinstance(other, Number):
             return Number(self.value + other.value, self.pos_start, other.pos_end, self.context), None
-        return None, self.illegal_operation(other)
+        else:
+            return None, TypeError(f"Cannot add Number with {type(other).__name__}")
 
     def subbed_by(self, other):
-        if isinstance(other, Number):
-            return Number(self.value - other.value, self.pos_start, other.pos_end, self.context), None
-        return None, self.illegal_operation(other)
+        return self.operate(other, "sub")
 
     def multed_by(self, other):
-        if isinstance(other, Number):
-            return Number(self.value * other.value, self.pos_start, other.pos_end, self.context), None
-        return None, self.illegal_operation(other)
+        return self.operate(other, "mul")
 
     def dived_by(self, other):
-        if isinstance(other, Number):
-            if other.value == 0:
-                return None, RuntimeError(
-                    other.pos_start, other.pos_end, "Division by zero", self.context
-                )
-            return Number(self.value / other.value, self.pos_start, other.pos_end, self.context), None
-        return None, self.illegal_operation(other)
-
+        return self.operate(other, "div")
+    
     def powed_by(self, other):
-        if isinstance(other, Number):
-            return Number(self.value ** other.value, self.pos_start, other.pos_end, self.context), None
-        return None, self.illegal_operation(other)
-
-    def illegal_operation(self, other=None):
-        if not other:
-            return RuntimeError(
-                self.pos_start, self.pos_end,
-                "Illegal operation",
-                self.context
-            )
-        return RuntimeError(
-            self.pos_start, self.pos_end,
-            f"Illegal operation between {self.__class__.__name__} and {other.__class__.__name__}",
-            self.context
-        )
+        return self.operate(other, "pow")
 
     def __repr__(self):
         return str(self.value)
@@ -933,20 +945,8 @@ class String:
             return String(self.value + other.value, self.pos_start, other.pos_end, self.context), None
         elif isinstance(other, Number):
             return String(self.value + str(other.value), self.pos_start, other.pos_end, self.context), None
-        return None, self.illegal_operation(other)
-
-    def illegal_operation(self, other=None):
-        if not other:
-            return RuntimeError(
-                self.pos_start, self.pos_end,
-                "Illegal operation",
-                self.context
-            )
-        return RuntimeError(
-            self.pos_start, self.pos_end,
-            f"Illegal operation between {self.__class__.__name__} and {other.__class__.__name__}",
-            self.context
-        )
+        else:
+            return None, TypeError(f"Cannot concatenate String with {type(other).__name__}")
 
     def __repr__(self):
         return f'"{self.value}"'
@@ -987,136 +987,82 @@ class Interpreter:
     def visit_NodeBinaryOp(self, node, context):
         res = RuntimeResult()
         left = res.register(self.visit(node.left_node, context))
-        if res.error: return res
+        if res.error:
+            return res
         right = res.register(self.visit(node.right_node, context))
-        if res.error: return res
+        if res.error:
+            return res
+
+        result = None
+        error = None
 
         if node.op_tok.type == TOKTYPE_PLUS:
-            if isinstance(left, String) or isinstance(right, String):
-                left_str = str(left.value) if isinstance(left, Number) else left.value
-                right_str = str(right.value) if isinstance(right, Number) else right.value
-                result = String(left_str + right_str, left.pos_start, right.pos_end, context)
-                return res.success(result)
-            elif isinstance(left, Number) and isinstance(right, Number):
-                result, error = left.added_to(right)
-                if error: return res.failure(error)
-                return res.success(result)
-            else:
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Addition requires numbers or strings",
-                    context
-                ))
+            result, error = left.added_to(right)
         elif node.op_tok.type == TOKTYPE_MINUS:
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Subtraction requires numeric operands",
-                    context
-                ))
             result, error = left.subbed_by(right)
         elif node.op_tok.type == TOKTYPE_MUL:
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Multiplication requires numeric operands",
-                    context
-                ))
             result, error = left.multed_by(right)
         elif node.op_tok.type == TOKTYPE_DIV:
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Division requires numeric operands",
-                    context
-                ))
             result, error = left.dived_by(right)
         elif node.op_tok.type == TOKTYPE_POWER:
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Exponentiation requires numeric operands",
-                    context
-                ))
             result, error = left.powed_by(right)
-        elif node.op_tok.type in (TOKTYPE_LT, TOKTYPE_LTE, TOKTYPE_GT, TOKTYPE_GTE):
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Comparison requires numeric operands",
-                    context
-                ))
-            if node.op_tok.type == TOKTYPE_LT:
-                result = Number(int(left.value < right.value))
-            elif node.op_tok.type == TOKTYPE_LTE:
-                result = Number(int(left.value <= right.value))
-            elif node.op_tok.type == TOKTYPE_GT:
-                result = Number(int(left.value > right.value))
-            elif node.op_tok.type == TOKTYPE_GTE:
-                result = Number(int(left.value >= right.value))
-        elif node.op_tok.type in (TOKTYPE_EQ, TOKTYPE_NE):
-            result = Number(int(left.value == right.value)) if node.op_tok.type == TOKTYPE_EQ else Number(int(left.value != right.value))
-        elif node.op_tok.type == TOKTYPE_AND:
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Logical AND requires numeric operands",
-                    context
-                ))
-            result = Number(int(left.value and right.value))
-        elif node.op_tok.type == TOKTYPE_OR:
-            if not (isinstance(left, Number) and isinstance(right, Number)):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Logical OR requires numeric operands",
-                    context
-                ))
-            result = Number(int(left.value or right.value))
+
+        elif node.op_tok.type == TOKTYPE_GT:
+            result = Number(left.value > right.value)
+        elif node.op_tok.type == TOKTYPE_LT: 
+            result = Number(left.value < right.value)
+        elif node.op_tok.type == TOKTYPE_GTE:  
+            result = Number(left.value >= right.value)
+        elif node.op_tok.type == TOKTYPE_LTE:  
+            result = Number(left.value <= right.value)
+        elif node.op_tok.type == TOKTYPE_EQ:  
+            result = Number(left.value == right.value)
+        elif node.op_tok.type == TOKTYPE_NE:  
+            result = Number(left.value != right.value)
+
+        elif node.op_tok.type == TOKTYPE_AND:  
+            result = Number(1 if left.value and right.value else 0)
+        elif node.op_tok.type == TOKTYPE_OR:  
+            result = Number(1 if left.value or right.value else 0)
+
         else:
             return res.failure(RuntimeError(
                 node.op_tok.pos_start, node.op_tok.pos_end,
-                "Unsupported operator",
-                context
+                "Unknown binary operator"
             ))
 
         if error:
             return res.failure(error)
-        result.set_pos(node.pos_start, node.pos_end).set_context(context)
-        return res.success(result)
+        else:
+            return res.success(result.set_pos(node.pos_start, node.pos_end))
 
 
 
     def visit_NodeUnaryOp(self, node, context):
         res = RuntimeResult()
         number = res.register(self.visit(node.node, context))
-        if res.error: return res
+        if res.error:
+            return res
+
+        error = None
 
         if node.op_tok.type == TOKTYPE_MINUS:
-            if not isinstance(number, Number):
-                return res.failure(RuntimeError(
-                    node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Unary minus requires a numeric operand",
-                    context
-                ))
             number, error = number.multed_by(Number(-1))
-        elif node.op_tok.type == TOKTYPE_NOT:
-            if not isinstance(number, Number):
+        elif node.op_tok.type == TOKTYPE_SQRT:
+            if number.value < 0:
                 return res.failure(RuntimeError(
                     node.op_tok.pos_start, node.op_tok.pos_end,
-                    "Logical NOT requires a numeric operand",
-                    context
+                    "Cannot take square root of a negative number"
                 ))
-            number = Number(1 if not number.value else 0)
-        else:
-            return res.failure(RuntimeError(
-                node.op_tok.pos_start, node.op_tok.pos_end,
-                "Unsupported unary operator",
-                context
-            ))
+            number = Number(number.value ** 0.5).set_context(number.context).set_pos(node.pos_start, node.pos_end)
+        elif node.op_tok.type == TOKTYPE_NOT:
+            number = Number(1 if not number.value else 0).set_context(number.context).set_pos(node.pos_start, node.pos_end)
 
-        if error: return res.failure(error)
-        number.set_pos(node.pos_start, node.pos_end).set_context(context)
-        return res.success(number)
+        if error:
+            return res.failure(error)
+        else:
+            return res.success(number.set_pos(node.pos_start, node.pos_end))
+
         
     def visit_NodeAssign(self, node, context):
         res = RuntimeResult()
@@ -1151,23 +1097,29 @@ class Interpreter:
         
     def visit_NodeConditional(self, node, context):
         res = RuntimeResult()
+
         for condition, body, _ in node.cases:
             condition_value = res.register(self.visit(condition, context))
-            if res.error: return res
-            if not isinstance(condition_value, Number):
-                return res.failure(RuntimeError(
-                    condition.pos_start, condition.pos_end,
-                    "Condition must evaluate to a number",
-                    context
-                ))
-            if condition_value.value:
-                return res.register(self.visit(body, context))
+            if res.error:
+                return res
+            
+            if condition_value.value:  
+                body_value = res.register(self.visit(body, context))
+                if res.error:
+                    return res
+                return res.success(body_value)
+
         if node.default_case:
-            return res.register(self.visit(node.default_case, context))
+            default_value = res.register(self.visit(node.default_case, context))
+            if res.error:
+                return res
+            return res.success(default_value)
+
         return res.success(None)
 
     def visit_NodeRepeat(self, node, context):
         res = RuntimeResult()
+
         start = res.register(self.visit(node.start_value, context))
         if res.error: return res
         end = res.register(self.visit(node.end_value, context))
@@ -1190,27 +1142,32 @@ class Interpreter:
 
         i = start.value
         while (i <= end.value) if (step.value > 0) else (i >= end.value):
-            loop_context = Context(node.var_name, parent=context)
-            loop_context.set(node.var_name, Number(i))
+            loop_context = Context(node.var_name.value, parent=context)  
+            loop_context.set(node.var_name.value, Number(i).set_context(loop_context)) 
+            
             res.register(self.visit(node.body, loop_context))
-            if res.error: return res
+            if res.error:
+                return res
+
             i += step.value
+
         return res.success(None)
     
     def visit_NodeWhile(self, node, context):
         res = RuntimeResult()
+
         while True:
             condition = res.register(self.visit(node.condition, context))
-            if res.error: return res
-            if not isinstance(condition, Number):
-                return res.failure(RuntimeError(
-                    node.condition.pos_start, node.condition.pos_end,
-                    "Condition must evaluate to a number",
-                    context
-                ))
-            if not condition.value: break
+            if res.error: 
+                return res
+
+            if not condition.value: 
+                break
+
             res.register(self.visit(node.body, context))
-            if res.error: return res
+            if res.error: 
+                return res
+
         return res.success(None)
     
     def visit_NodeDisplay(self, node, context):
@@ -1222,6 +1179,41 @@ class Interpreter:
             print(value.value)  
         else:
             print(value)
+        return res.success(None)
+    
+    def visit_NodeRepeatTimes(self, node, context):
+        res = RuntimeResult()
+        times_value = res.register(self.visit(node.times_expr, context))
+        if res.error:
+            return res
+
+        if not isinstance(times_value, Number):
+            return res.failure(RuntimeError(
+                node.times_expr.pos_start, node.times_expr.pos_end,
+                "Repetition count must be a number",
+                context
+            ))
+
+        try:
+            times = int(times_value.value)
+            if times < 0:
+                return res.failure(RuntimeError(
+                    node.times_expr.pos_start, node.times_expr.pos_end,
+                    "Repetition count cannot be negative",
+                    context
+                ))
+        except ValueError:
+            return res.failure(RuntimeError(
+                node.times_expr.pos_start, node.times_expr.pos_end,
+                "Repetition count must be an integer",
+                context
+            ))
+
+        for _ in range(times):
+            res.register(self.visit(node.body, context))
+            if res.error:
+                return res
+
         return res.success(None)
 
 
