@@ -90,6 +90,11 @@ repeat 3 times:
 ```stasiu
 create fruits = ["apple", "banana", "cherry"]
 display: fruits[1]  # Outputs "banana"
+
+create numbers = [1, 2, 3]
+add 4 to numbers           # numbers becomes [1, 2, 3, 4]
+remove 2 from numbers      # numbers becomes [1, 3, 4]
+remove index 0 from numbers  # numbers becomes [3, 4]
 ```
 
 ---
