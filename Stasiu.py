@@ -261,7 +261,6 @@ class Lexer:
             '+': TOKTYPE_PLUS,
             '-': TOKTYPE_MINUS,
             '*': TOKTYPE_MUL,
-            '/': TOKTYPE_DIV,
             '^': TOKTYPE_POWER,
             '(': TOKTYPE_LPAREN,
             ')': TOKTYPE_RPAREN,
@@ -320,11 +319,26 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_GT, pos_start=pos_start, pos_end=self.pos.copy()))
             elif self.character_current == '"':
                 tokens.append(self.make_string())
-            else:
-                pos_start = self.pos.copy()
-                char = self.character_current
-                self.next_character()
-                return [], CharacterFormatError(pos_start, self.pos, f"'{char}'")
+            elif self.character_current == '/':
+                next_char = self.peek_next()
+                if next_char == '*':
+                    pos_start = self.pos.copy()
+                    self.next_character()  
+                    self.next_character()  
+                    comment_closed = False
+                    while self.character_current:
+                        if self.character_current == '*' and self.peek_next() == '/':
+                            self.next_character()  
+                            self.next_character()  
+                            comment_closed = True
+                            break
+                        self.next_character()
+                    if not comment_closed:
+                        return [], CharacterFormatError(pos_start, self.pos, "Unclosed multi-line comment")
+                else:
+                    pos_start = self.pos.copy()
+                    self.next_character()
+                    tokens.append(Token(TOKTYPE_DIV, pos_start=pos_start, pos_end=self.pos.copy()))
 
         return tokens, None
     
@@ -346,6 +360,12 @@ class Lexer:
         else: 
             return Token(TOKTYPE_NUMBER, float(num_str), pos_start, self.pos.copy())
 
+    def peek_next(self):
+        peek_pos = self.pos.idx + 1
+        if peek_pos < len(self.text):
+            return self.text[peek_pos]
+        else:
+            return None
         
 #NODES
 
