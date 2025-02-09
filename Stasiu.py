@@ -10,10 +10,16 @@ class Error:
         self.details = details
 
     def stringify(self):
-        result  = f'{self.error_name}: {self.details}\n'
-        result += f'File {self.pos_start.filename}, line {self.pos_start.ln + 1}'
-        result += '\n\n' + highlight_text_with_arrows(self.pos_start.fulltxt, self.pos_start, self.pos_end)
+        result = f'{self.error_name}: {self.details}\n'
+        
+        if self.pos_start:
+            result += f'File {self.pos_start.filename}, line {self.pos_start.ln + 1}'
+            result += '\n\n' + highlight_text_with_arrows(self.pos_start.fulltxt, self.pos_start, self.pos_end)
+        else:
+            result += 'File: Unknown, Line: Unknown\n\n(No position data available)'
+
         return result
+
 
 class WrongSyntaxError(Error):
 	def __init__(self, pos_start, pos_end, details=''):
@@ -92,6 +98,9 @@ TOKTYPE_STRING     = 'STRING'
 TOKTYPE_INT 	   = 'INT'
 TOKTYPE_FLOAT      = 'FLOAT'
 TOKTYPE_EOF        = 'END_OF_FILE'
+TOKTYPE_NEWLINE    = 'NEWLINE'
+TOKTYPE_INDENT     = 'INDENT'
+TOKTYPE_DEDENT     = 'DEDENT'
 
 # Keywords
 TOKTYPE_DISPLAY    = 'DISPLAY'
@@ -135,20 +144,19 @@ TOKTYPE_OR         = 'OR'
 TOKTYPE_NOT        = 'NOT'
 
 class Token:
-    def __init__(self, type_, value = None, pos_start=None, pos_end=None):
+    def __init__(self, type_, value=None, pos_start=None, pos_end=None):
         self.type = type_
         self.value = value
 
-        if pos_start:
-            self.pos_start = pos_start.copy()
-            self.pos_end =pos_start.copy()
-            
+        self.pos_start = pos_start.copy() if pos_start else None
+        self.pos_end = pos_end.copy() if pos_end else (pos_start.copy() if pos_start else None)
 
         if pos_end:
-            self.pos_end = pos_end
+            self.pos_end = pos_end.copy()
 
     def __repr__(self):
-        if self.value: return f'{self.type}:{self.value}'
+        if self.value is not None:  
+            return f'{self.type}:{self.value}'
         return f'{self.type}'
 
 
@@ -160,6 +168,7 @@ class Lexer:
         self.text = text
         self.pos = Position(-1, 0, -1, fn, text)
         self.character_current = None
+        self.indent_stack = [0]
         self.next_character()
 
     def next_character(self):
@@ -262,7 +271,8 @@ class Lexer:
 
     def make_tokens(self):
         tokens = []
-    
+        in_indent = True
+
         SINGLE_CHAR_TOKENS = {
             '+': TOKTYPE_PLUS,
             '-': TOKTYPE_MINUS,
@@ -275,22 +285,50 @@ class Lexer:
             ':': TOKTYPE_COLON,
             ',': TOKTYPE_COMMA,
         }
-        
-        while self.character_current:
-            if self.character_current in ' \t\n':
-                self.next_character()
-            elif self.character_current in DIGITS:
-                tokens.append(self.make_number())
-            elif self.character_current in LETTERS:
-                tokens.append(self.make_identifier_or_keyword())
-            elif self.character_current == '#':
-                while self.character_current and self.character_current != '\n':
+
+        while self.character_current is not None:
+            if in_indent:
+                indent_level = 0
+                while self.character_current in ' \t':
+                    indent_level += 1
                     self.next_character()
+                if indent_level < self.indent_stack[-1]:
+                    while indent_level < self.indent_stack[-1]:
+                        tokens.append(Token(TOKTYPE_DEDENT))
+                        self.indent_stack.pop()
+                if indent_level > self.indent_stack[-1]:
+                    tokens.append(Token(TOKTYPE_INDENT))
+                    self.indent_stack.append(indent_level)
+                in_indent = False
+            
+            elif self.character_current == '\n':
+                tokens.append(Token(TOKTYPE_NEWLINE))
+                self.next_character()
+                in_indent = True 
+
             elif self.character_current in SINGLE_CHAR_TOKENS:
                 pos_start = self.pos.copy()
                 tok_type = SINGLE_CHAR_TOKENS[self.character_current]
                 self.next_character()
                 tokens.append(Token(tok_type, pos_start=pos_start, pos_end=self.pos.copy()))
+
+                if tok_type == TOKTYPE_COLON and self.character_current == '\n':
+                    tokens.append(Token(TOKTYPE_NEWLINE))
+                    self.next_character()
+                    indent_level = 0
+                    while self.character_current in ' \t':
+                        indent_level += 1
+                        self.next_character()
+                    if indent_level > self.indent_stack[-1]:
+                        tokens.append(Token(TOKTYPE_INDENT))
+                        self.indent_stack.append(indent_level)
+
+            elif self.character_current in DIGITS:
+                tokens.append(self.make_number())
+
+            elif self.character_current in LETTERS:
+                tokens.append(self.make_identifier_or_keyword())
+
             elif self.character_current == '=':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -299,6 +337,7 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_EQ, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
                     tokens.append(Token(TOKTYPE_EQUALS, pos_start=pos_start, pos_end=self.pos.copy()))
+
             elif self.character_current == '!':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -307,6 +346,7 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_NE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
                     return [], CharacterFormatError(pos_start, self.pos, "'!' without '='")
+
             elif self.character_current == '<':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -315,6 +355,7 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_LTE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
                     tokens.append(Token(TOKTYPE_LT, pos_start=pos_start, pos_end=self.pos.copy()))
+
             elif self.character_current == '>':
                 pos_start = self.pos.copy()
                 self.next_character()
@@ -323,30 +364,42 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_GTE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
                     tokens.append(Token(TOKTYPE_GT, pos_start=pos_start, pos_end=self.pos.copy()))
+
             elif self.character_current == '"':
                 tokens.append(self.make_string())
+
             elif self.character_current == '/':
                 next_char = self.peek_next()
-                if next_char == '*':
+                if next_char == '*': 
                     pos_start = self.pos.copy()
-                    self.next_character()  
-                    self.next_character()  
+                    self.next_character()
+                    self.next_character()
                     comment_closed = False
                     while self.character_current:
                         if self.character_current == '*' and self.peek_next() == '/':
-                            self.next_character()  
-                            self.next_character()  
+                            self.next_character()
+                            self.next_character()
                             comment_closed = True
                             break
                         self.next_character()
                     if not comment_closed:
                         return [], CharacterFormatError(pos_start, self.pos, "Unclosed multi-line comment")
-                else:
+                else:  
                     pos_start = self.pos.copy()
                     self.next_character()
                     tokens.append(Token(TOKTYPE_DIV, pos_start=pos_start, pos_end=self.pos.copy()))
 
+            while self.character_current and self.character_current in ' \t':
+                self.next_character()
+
+        while len(self.indent_stack) > 1:
+            tokens.append(Token(TOKTYPE_DEDENT))
+            self.indent_stack.pop()
+
+        print(f"Lexer Tokens: {tokens}")
         return tokens, None
+
+
     
     def make_number(self):
         pos_start = self.pos.copy()
@@ -361,11 +414,16 @@ class Lexer:
             num_str += self.character_current
             self.next_character()
 
-        if dot_count == 0: 
-            return Token(TOKTYPE_NUMBER, int(num_str), pos_start, self.pos.copy())
-        else: 
-            return Token(TOKTYPE_NUMBER, float(num_str), pos_start, self.pos.copy())
+        if not num_str:
+            return None  
 
+        if dot_count == 0:
+            value = int(num_str)
+        else:
+            value = float(num_str)
+
+        return Token(TOKTYPE_NUMBER, value, pos_start, self.pos.copy())
+    
     def peek_next(self):
         peek_pos = self.pos.idx + 1
         if peek_pos < len(self.text):
@@ -441,8 +499,19 @@ class NodeConditional:
         self.cases = cases  
         self.default_case = default_case
 
+        self.pos_start = cases[0][0].pos_start if cases else None
+
+        if default_case:
+            self.pos_end = default_case.pos_end
+        elif cases and isinstance(cases[-1][1], BlockNode):  
+            self.pos_end = cases[-1][1].pos_end
+        else:
+            self.pos_end = self.pos_start 
+
     def __repr__(self):
         return f"NodeConditional(cases={self.cases}, default_case={self.default_case})"
+
+
 
 class NodeRepeat:
     def __init__(self, var_name, start_value, end_value, step_value, body):
@@ -546,6 +615,15 @@ class NodeFunctionCall:
 
     def __repr__(self):
         return f"{self.func_name_tok.value}({', '.join(map(str, self.args))})"
+    
+class BlockNode:
+    def __init__(self, statements):
+        self.statements = statements
+        self.pos_start = statements[0].pos_start if statements else None
+        self.pos_end = statements[-1].pos_end if statements else None
+
+    def __repr__(self):
+        return f"Block({self.statements})"
 
 #THE RESULT OF PARSE
 
@@ -577,10 +655,13 @@ class Parser:
         self.tokens = tokens
         self.tok_idx = -1
         self.token_current = None
+        self.prev_token = None 
         self.next_character()
+        print("Final Lexer Tokens:", tokens)
         print(f"Initializing parser with tokens: {self.tokens}")
 
     def next_character(self):
+        self.prev_token = self.token_current
         self.tok_idx += 1
         if self.tok_idx < len(self.tokens):
             self.token_current = self.tokens[self.tok_idx]
@@ -588,7 +669,7 @@ class Parser:
             self.token_current = None
         print(f"next_character: Current token is now {self.token_current}")
         return self.token_current
-    
+
     def peek(self):
         peek_idx = self.tok_idx + 1
         if peek_idx < len(self.tokens):
@@ -596,14 +677,42 @@ class Parser:
         else:
             return None
 
+    def expect(self, tok_type):
+        res = ResultOfParse()
+        if self.token_current and self.token_current.type == tok_type:
+            res.register(self.next_character())
+            return res.success(True)
+        else:
+            if self.token_current:
+                pos_start = self.token_current.pos_start
+                pos_end = self.token_current.pos_end
+            elif self.prev_token:
+                pos_start = self.prev_token.pos_end.copy()
+                pos_end = pos_start
+            else:
+                pos_start = Position(0, 0, -1, '<unknown>', '')
+                pos_end = pos_start
+            
+            msg = f"Expected '{tok_type}', got '{self.token_current.type}'" if self.token_current else f"Expected '{tok_type}'"
+            return res.failure(WrongSyntaxError(pos_start, pos_end, msg))
+
     def parse(self):
-        res = self.statement()
-        if not res.error and self.token_current is not None:
-            return res.failure(WrongSyntaxError(
-                self.token_current.pos_start, self.token_current.pos_end,
-                f"Expected end of input, found '{self.token_current.value}'"
-            ))
-        return res
+        res = ResultOfParse()
+        statements = []
+        
+        while self.token_current is not None:
+            while self.token_current and self.token_current.type in (TOKTYPE_NEWLINE, TOKTYPE_DEDENT):
+                res.register(self.next_character())
+            
+            if self.token_current is None:
+                break
+            
+            stmt = res.register(self.statement())
+            if res.error:
+                return res
+            statements.append(stmt)
+        
+        return res.success(BlockNode(statements)) if statements else res.success(None)
 
     def statement(self):
         res = ResultOfParse()
@@ -692,8 +801,14 @@ class Parser:
         tok = self.token_current
 
         if not tok:
+            if self.prev_token:
+                pos_start = self.prev_token.pos_end.copy()
+                pos_end = pos_start
+            else:
+                pos_start = Position(0, 0, -1, '<unknown>', '')
+                pos_end = pos_start
             return res.failure(WrongSyntaxError(
-                None, None,
+                pos_start, pos_end,
                 "Unexpected end of input, expected a number, string, or identifier"
             ))
 
@@ -813,6 +928,37 @@ class Parser:
                         f"Unexpected token: '{tok.value}'"
                     ))
             
+    def block(self):
+        res = ResultOfParse()
+        statements = []
+
+        while self.token_current and self.token_current.type == TOKTYPE_NEWLINE:
+            res.register(self.next_character())
+
+        if not (self.token_current and self.token_current.type == TOKTYPE_INDENT):
+            return res.failure(WrongSyntaxError(
+                self.token_current.pos_start if self.token_current else None,
+                self.token_current.pos_end if self.token_current else None,
+                "Expected indented block after colon"
+            ))
+        res.register(self.next_character())  
+
+        while self.token_current and self.token_current.type != TOKTYPE_DEDENT:
+            while self.token_current and self.token_current.type == TOKTYPE_NEWLINE:
+                res.register(self.next_character())
+
+            if self.token_current and self.token_current.type == TOKTYPE_DEDENT:
+                break
+
+            stmt = res.register(self.statement())
+            if res.error:
+                return res
+            statements.append(stmt)
+
+        if self.token_current and self.token_current.type == TOKTYPE_DEDENT:
+            res.register(self.next_character())
+
+        return res.success(BlockNode(statements))
 
     def conditional(self):
         res = ResultOfParse()
@@ -820,54 +966,85 @@ class Parser:
         default_case = None
 
         if self.token_current and self.token_current.type == TOKTYPE_WHEN:
-            print("Parsing 'when' statement")
+            pos_start = self.token_current.pos_start.copy()
             res.register(self.next_character())
 
-            condition = res.register(self.expr())  
-            if res.error: return res
+            condition = res.register(self.expr())
+            if res.error:
+                return res
 
-            if self.token_current and self.token_current.type == TOKTYPE_THEN:
-                res.register(self.next_character())
-                body = res.register(self.statement())  
-                if res.error: return res
-                cases.append((condition, body, None))  
-            else:
+            if not (self.token_current and self.token_current.type == TOKTYPE_THEN):
                 return res.failure(WrongSyntaxError(
-                    condition.pos_start, condition.pos_end,
-                    "Expected 'then' after condition in 'when' statement"
+                    self.token_current.pos_start if self.token_current else pos_start,
+                    self.token_current.pos_end if self.token_current else pos_start,
+                    "Expected 'then' after condition"
                 ))
+            res.register(self.next_character())
+
+            if not (self.token_current and self.token_current.type == TOKTYPE_COLON):
+                return res.failure(WrongSyntaxError(
+                    self.token_current.pos_start if self.token_current else pos_start,
+                    self.token_current.pos_end if self.token_current else pos_start,
+                    "Expected ':' after 'then'"
+                ))
+            res.register(self.next_character())
+
+            body = res.register(self.block())
+            if res.error:
+                return res
+            cases.append((condition, body))
 
             while self.token_current and self.token_current.type == TOKTYPE_OTHERWISE_WHEN:
-                print("Parsing 'otherwise when' statement")
                 res.register(self.next_character())
 
-                condition = res.register(self.expr())  
-                if res.error: return res
+                condition = res.register(self.expr())
+                if res.error:
+                    return res
 
-                if self.token_current and self.token_current.type == TOKTYPE_THEN:
-                    res.register(self.next_character())
-                    body = res.register(self.statement())  
-                    if res.error: return res
-                    cases.append((condition, body, None))  
-                else:
+                if not (self.token_current and self.token_current.type == TOKTYPE_THEN):
                     return res.failure(WrongSyntaxError(
-                        condition.pos_start, condition.pos_end,
-                        "Expected 'then' after condition in 'otherwise when' statement"
+                        self.token_current.pos_start if self.token_current else pos_start,
+                        self.token_current.pos_end if self.token_current else pos_start,
+                        "Expected 'then' after condition"
                     ))
+                res.register(self.next_character())
+
+                if not (self.token_current and self.token_current.type == TOKTYPE_COLON):
+                    return res.failure(WrongSyntaxError(
+                        self.token_current.pos_start if self.token_current else pos_start,
+                        self.token_current.pos_end if self.token_current else pos_start,
+                        "Expected ':' after 'then'"
+                    ))
+                res.register(self.next_character())
+
+                body = res.register(self.block())
+                if res.error:
+                    return res
+                cases.append((condition, body))
 
             if self.token_current and self.token_current.type == TOKTYPE_IN_ANY_OTHER_CASE:
-                print("Parsing 'in any other case' statement")
+                res.register(self.next_character()) 
+
+                if not (self.token_current and self.token_current.type == TOKTYPE_COLON):
+                    return res.failure(WrongSyntaxError(
+                        self.token_current.pos_start if self.token_current else pos_start,
+                        self.token_current.pos_end if self.token_current else pos_start,
+                        "Expected ':' after 'in any other case'"
+                    ))
                 res.register(self.next_character())
-                default_case = res.register(self.statement())
-                if res.error: return res
+
+                default_case = res.register(self.block())
+                if res.error:
+                    return res
 
             return res.success(NodeConditional(cases, default_case))
 
         return res.failure(WrongSyntaxError(
             self.token_current.pos_start if self.token_current else None,
             self.token_current.pos_end if self.token_current else None,
-            "Expected 'when', 'otherwise when', or 'in any other case'"
+            "Expected 'when' statement"
         ))
+
 
     def repeat_statement(self):
         res = ResultOfParse()
@@ -877,11 +1054,8 @@ class Parser:
 
         if self.token_current and self.token_current.type == TOKTYPE_IDENTIFIER:
             var_name_tok = self.token_current
-            saved_idx = self.tok_idx
             next_tok = self.peek()
             
-            print(f"DEBUG: Found identifier {var_name_tok}, next token = {next_tok}")
-
             if next_tok and next_tok.type == TOKTYPE_FROM:
                 res.register(self.next_character())  
                 res.register(self.next_character())  
@@ -914,7 +1088,7 @@ class Parser:
                     ))
                 res.register(self.next_character())
 
-                body = res.register(self.statement())
+                body = res.register(self.block())
                 if res.error: return res
 
                 return res.success(NodeRepeat(
@@ -944,7 +1118,7 @@ class Parser:
             ))
         res.register(self.next_character())
 
-        body = res.register(self.statement())
+        body = res.register(self.block())
         if res.error: return res
 
         return res.success(NodeRepeatTimes(times_expr, body))
@@ -1163,10 +1337,14 @@ def execute_run(exec_ctx):
 
     _, error = run(fn.value, script, exec_ctx)
     if error:
+        if isinstance(error, RuntimeError):
+            error_msg = error.as_string()
+        else:
+            error_msg = error.stringify()
         return res.failure(RuntimeError(
             error.pos_start,
             error.pos_end,
-            f"Error executing script: {error.details}\n{error.generate_traceback()}",
+            f"Error executing script:\n{error_msg}",
             exec_ctx
         ))
 
@@ -1457,16 +1635,16 @@ class Interpreter:
     def visit_NodeConditional(self, node, context):
         res = RuntimeResult()
 
-        for condition, body, _ in node.cases:
+        for condition, body in node.cases:
             condition_value = res.register(self.visit(condition, context))
             if res.error:
                 return res
-            
+
             if condition_value.value:  
                 body_value = res.register(self.visit(body, context))
                 if res.error:
                     return res
-                return res.success(body_value)
+                return res.success(body_value) 
 
         if node.default_case:
             default_value = res.register(self.visit(node.default_case, context))
@@ -1475,6 +1653,7 @@ class Interpreter:
             return res.success(default_value)
 
         return res.success(None)
+
 
     def visit_NodeRepeat(self, node, context):
         res = RuntimeResult()
@@ -1697,16 +1876,26 @@ class Interpreter:
             ))
         
         try:
-            user_input = input(prompt.value)
-        except:
+            user_input = input(prompt.value.strip())
+            try:
+                num_value = int(user_input)
+            except ValueError:
+                num_value = float(user_input)
+        except ValueError:
             return res.failure(RuntimeError(
                 node.pos_start, node.pos_end,
-                "Failed to read input",
+                f"Invalid numeric input: '{user_input}'",
+                context
+            ))
+        except Exception as e:
+            return res.failure(RuntimeError(
+                node.pos_start, node.pos_end,
+                f"Input error: {str(e)}",
                 context
             ))
         
         var_name = node.var_name_tok.value
-        context.set(var_name, String(user_input).set_context(context))
+        context.set(var_name, Number(num_value).set_context(context))
         
         return res.success(None)
     
@@ -1753,6 +1942,13 @@ class Interpreter:
                 context
         ))
 
+    def visit_BlockNode(self, node, context):
+        res = RuntimeResult()
+        for stmt in node.statements:
+            res.register(self.visit(stmt, context))
+            if res.error: return res
+        return res.success(None)
+
 #RUN
 
 global_context = Context('<program>')
@@ -1773,4 +1969,3 @@ def run(fn, text, context=global_context):
     result = interpreter.visit(ast.node, context)
 
     return result.value, result.error
-
