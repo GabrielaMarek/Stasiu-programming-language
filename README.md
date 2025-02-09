@@ -1,5 +1,8 @@
 # Stasiu Programming Language
-FOR NOW MOST OF THE CODE MUST BE TYPED IN ONE LINE IN THE CONSOLE, I am working on supporting mulitilines
+The code is executable in most cases, you must create a file named "example.stas" (or whatever you want) and run the shell.py. In the terminal run your file:
+```stasiu
+run("example.stas")
+```
 
 
 Stasiu is a dynamically-typed, interpreted programming language designed for simplicity and educational purposes. It features a clean syntax with influences from Python and pseudocode conventions, making it ideal for beginners learning programming concepts.
