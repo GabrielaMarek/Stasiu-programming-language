@@ -66,11 +66,11 @@ display: x + 5  # Outputs 15
 ```stasiu
 score = 30
 
-when score > 90 then
+when score > 90 then:
     display: "A"
-otherwise when score > 80 then
+otherwise when score > 80 then:
     display: "B"
-in any other case
+in any other case:
     display: "C"
 ```
 
