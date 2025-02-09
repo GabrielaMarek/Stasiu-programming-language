@@ -64,14 +64,15 @@ display: x + 5  # Outputs 15
 
 ### Conditional Logic
 ```stasiu
-score = 30
+ask: "How old are you? " then save to age
 
-when score > 90 then:
-    display: "A"
-otherwise when score > 80 then:
-    display: "B"
+when (age >= 0 and age < 13) then:
+    display: "You are a child"
+otherwise when (age >= 13 and age < 20) then:
+    display: "You are a teenager"
 in any other case:
-    display: "C"
+    display: "You are: " + age + " years old."
+
 ```
 
 ### Loops
