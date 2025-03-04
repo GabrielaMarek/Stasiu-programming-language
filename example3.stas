@@ -1,0 +1,5 @@
+create numbers = [1, 2, 3]
+add 4 to numbers
+remove 2 from numbers
+remove index 0 from numbers
+display: numbers

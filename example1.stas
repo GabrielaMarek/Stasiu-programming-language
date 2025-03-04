@@ -1,4 +1,4 @@
-ask: "How old are you? " then save to age
+age = 20
 
 when (age >= 0 and age < 13) then:
     display: "You are a child"

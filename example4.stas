@@ -1,0 +1,2 @@
+ask: "What is your age? " then save to age
+display: "Your age is: " + age
