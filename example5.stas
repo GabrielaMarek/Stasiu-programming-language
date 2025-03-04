@@ -1,0 +1,2 @@
+repeat 5 times:
+    display: "Hooray!"

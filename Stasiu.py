@@ -1866,7 +1866,8 @@ class Interpreter:
         res = RuntimeResult()
         
         prompt = res.register(self.visit(node.prompt_expr, context))
-        if res.error: return res
+        if res.error: 
+            return res
         
         if not isinstance(prompt, String):
             return res.failure(RuntimeError(
@@ -1875,27 +1876,20 @@ class Interpreter:
                 context
             ))
         
+        user_input = input(prompt.value)
+        
         try:
-            user_input = input(prompt.value.strip())
-            try:
-                num_value = int(user_input)
-            except ValueError:
-                num_value = float(user_input)
+            value = int(user_input)
+            stored_value = Number(value).set_context(context)
         except ValueError:
-            return res.failure(RuntimeError(
-                node.pos_start, node.pos_end,
-                f"Invalid numeric input: '{user_input}'",
-                context
-            ))
-        except Exception as e:
-            return res.failure(RuntimeError(
-                node.pos_start, node.pos_end,
-                f"Input error: {str(e)}",
-                context
-            ))
+            try:
+                value = float(user_input)
+                stored_value = Number(value).set_context(context)
+            except ValueError:
+                stored_value = String(user_input).set_context(context)
         
         var_name = node.var_name_tok.value
-        context.set(var_name, Number(num_value).set_context(context))
+        context.set(var_name, stored_value)
         
         return res.success(None)
     
