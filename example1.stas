@@ -1,6 +1,6 @@
-age = 10
+age = 10   
 
-when (age >= 0 and age < 13) then:
+when (age >= 0 and age < 13) then:   #asdsd
     display: "You are a child"
 otherwise when (age >= 13 and age < 20) then:
     display: "You are a teenager"

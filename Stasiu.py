@@ -392,6 +392,20 @@ class Lexer:
             while self.character_current and self.character_current in ' \t':
                 self.next_character()
 
+            if self.character_current == '\n':
+                tokens.append(Token(TOKTYPE_NEWLINE))
+                self.next_character()
+                in_indent = True
+
+            if self.character_current == '#':
+                while self.character_current and self.character_current != '\n':
+                    self.next_character()
+                if self.character_current == '\n':
+                    tokens.append(Token(TOKTYPE_NEWLINE))
+                    self.next_character()
+                    in_indent = True
+                continue
+
         while len(self.indent_stack) > 1:
             tokens.append(Token(TOKTYPE_DEDENT))
             self.indent_stack.pop()
