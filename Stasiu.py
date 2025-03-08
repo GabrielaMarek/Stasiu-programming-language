@@ -46,7 +46,11 @@ class RuntimeError(Error):
         ctx = self.context
 
         while ctx:
-            result = f'  File {pos.filename}, line {str(pos.ln + 1)}, in {ctx.display_name}\n' + result
+            if pos is not None:
+                file_info = f'File {pos.filename}, line {pos.ln + 1}'
+            else:
+                file_info = 'File unknown, line unknown'
+            result = f'  {file_info}, in {ctx.display_name}\n' + result
             pos = ctx.parent_entry_pos
             ctx = ctx.parent
 
@@ -1325,11 +1329,30 @@ class BuiltInFunction:
 
     def execute(self, exec_ctx):
         return self.func(exec_ctx)
+    
+def execute_sqrt(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    if n.value < 0:
+        return res.failure(RuntimeError(
+            n.pos_start, n.pos_end,
+            "Cannot sqrt negative number", exec_ctx
+        ))
+        
+    return res.success(Number(n.value**0.5))
+execute_sqrt.arg_names = ["n"]
 
 def execute_run(exec_ctx):
     res = RuntimeResult()
-    fn = exec_ctx.symbol_table.get("fn")  
-
+    fn = exec_ctx.symbol_table.get("fn")
+    
     if not isinstance(fn, String):
         return res.failure(RuntimeError(
             fn.pos_start if fn else None,
@@ -1349,18 +1372,10 @@ def execute_run(exec_ctx):
             exec_ctx
         ))
 
-    _, error = run(fn.value, script, exec_ctx)
+    child_ctx = Context(f"script_{fn.value}", parent=exec_ctx)
+    _, error = run(fn.value, script, child_ctx) 
     if error:
-        if isinstance(error, RuntimeError):
-            error_msg = error.as_string()
-        else:
-            error_msg = error.stringify()
-        return res.failure(RuntimeError(
-            error.pos_start,
-            error.pos_end,
-            f"Error executing script:\n{error_msg}",
-            exec_ctx
-        ))
+        return res.failure(error)
 
     return res.success(Number.null)
 execute_run.arg_names = ["fn"]
@@ -1516,7 +1531,12 @@ class Context:
         self.symbol_table[var_name] = value
 
     def get(self, var_name):
-        return self.symbol_table.get(var_name)
+        value = self.symbol_table.get(var_name)
+        if value is not None:
+            return value
+        if self.parent is not None:
+            return self.parent.get(var_name)
+        return None
 
 
 #INTERPRETER
@@ -1960,6 +1980,7 @@ class Interpreter:
 #RUN
 
 global_context = Context('<program>')
+global_context.set("sqrt", BuiltInFunction(execute_sqrt))
 global_context.set("run", BuiltInFunction(execute_run))
 
 def run(fn, text, context=global_context):
