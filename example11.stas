@@ -1,12 +1,20 @@
-matrix = [[1, 2, 3], 
-          [4, 5, 6], 
-          [7, 8, 9]]
-transposed = []
+display: 10 % 3
+display: 15 % 4
+display: 20 % 5
+display: 7 % 2
+display: 8 % 2
+display: 3 % 5
 
-repeat i from 0 to len(matrix[0])-1:
-    new_row = []
-    repeat j from 0 to len((matrix))-1:
-        add matrix[j][i] to new_row
-    add new_row to transposed
+a = 25
+b = 4
+display: a % b
 
-display: transposed  # [[1,4,7], [2,5,8], [3,6,9]]
+display: -10 % 3
+display: 10 % -3
+display: -15 % 4
+
+repeat num from 1 to 10:
+    when num % 2 == 0 then:
+        display: str(num) + " is even"
+    in any other case:
+        display: str(num) + " is odd"

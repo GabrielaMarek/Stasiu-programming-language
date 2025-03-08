@@ -95,6 +95,7 @@ TOKTYPE_MUL        = 'MUL'
 TOKTYPE_DIV        = 'DIV'
 TOKTYPE_POWER      = 'POWER'
 TOKTYPE_SQRT       = 'SQRT'
+TOKTYPE_MOD        = 'MOD'
 
 # Assignment and Variables
 TOKTYPE_EQUALS     = 'EQUALS'
@@ -129,6 +130,7 @@ TOKTYPE_REMOVE     = 'REMOVE'
 TOKTYPE_INDEX      = 'INDEX'
 TOKTYPE_ASK        = 'ASK'
 TOKTYPE_SAVE       = 'SAVE'
+TOKTYPE_BREAK      = 'BREAK'
 
 # Symbols
 TOKTYPE_LBRACKET   = 'LBRACKET'
@@ -244,6 +246,7 @@ class Lexer:
             'remove': TOKTYPE_REMOVE,
             'index': TOKTYPE_INDEX,
             'ask': TOKTYPE_ASK,
+            'break': TOKTYPE_BREAK,
             'save': TOKTYPE_SAVE
         }.get(identifier_str, TOKTYPE_IDENTIFIER)
 
@@ -370,6 +373,10 @@ class Lexer:
                     tokens.append(Token(TOKTYPE_GTE, pos_start=pos_start, pos_end=self.pos.copy()))
                 else:
                     tokens.append(Token(TOKTYPE_GT, pos_start=pos_start, pos_end=self.pos.copy()))
+
+            elif self.character_current == '%':
+                tokens.append(Token(TOKTYPE_MOD, pos_start=self.pos))
+                self.next_character()
 
             elif self.character_current == '"':
                 tokens.append(self.make_string())
@@ -530,8 +537,11 @@ class NodeConditional:
 
     def __repr__(self):
         return f"NodeConditional(cases={self.cases}, default_case={self.default_case})"
-
-
+    
+class BreakNode:
+    def __init__(self, pos_start, pos_end):
+        self.pos_start = pos_start
+        self.pos_end = pos_end
 
 class NodeRepeat:
     def __init__(self, var_name, start_value, end_value, step_value, body):
@@ -742,6 +752,9 @@ class Parser:
         
         if self.token_current and self.token_current.type == TOKTYPE_REPEAT:
             return self.repeat_statement()
+        
+        if self.token_current.type == TOKTYPE_BREAK:
+            return self.break_statement()
 
         if self.token_current and self.token_current.type == TOKTYPE_WHEN:
             return self.conditional()
@@ -799,7 +812,7 @@ class Parser:
         return self.bin_op(self.factor, (TOKTYPE_PLUS, TOKTYPE_MINUS))
 
     def factor(self):
-        return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV))
+        return self.bin_op(self.power, (TOKTYPE_MUL, TOKTYPE_DIV, TOKTYPE_MOD))
 
     def power(self):
         return self.bin_op(self.unary, (TOKTYPE_POWER,))
@@ -1301,6 +1314,12 @@ class Parser:
         res.register(self.next_character())
         
         return res.success(NodeAsk(prompt_expr, var_name_tok, pos_start, var_name_tok.pos_end))
+    
+    def break_statement(self):
+        res = ResultOfParse()
+        pos_start = self.token_current.pos_start.copy()
+        res.register(self.next_character())
+        return res.success(BreakNode(pos_start, pos_end=pos_start))
 
     def bin_op(self, func_a, ops, func_b=None):
         if func_b is None:
@@ -1766,6 +1785,26 @@ def execute_join(exec_ctx):
     return res.success(String(joined))
 execute_join.arg_names = ["list", "separator"]
 
+def execute_str(exec_ctx):
+    res = RuntimeResult()
+    value = exec_ctx.symbol_table.get("value")
+    
+    if isinstance(value, Number):
+        return res.success(String(str(value.value)))
+    elif isinstance(value, String):
+        return res.success(value)
+    elif isinstance(value, List):
+        elements = [str(e.value) if isinstance(e, Number) else e.value for e in value.elements]
+        return res.success(String(", ".join(elements)))
+    else:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, 
+            exec_ctx.parent_entry_pos,
+            "Unsupported type for string conversion",
+            exec_ctx 
+        ))
+execute_str.arg_names = ["value"]
+
 def execute_run(exec_ctx):
     res = RuntimeResult()
     fn = exec_ctx.symbol_table.get("fn")
@@ -1875,6 +1914,13 @@ class Number:
     
     def __eq__(self, other):
         return isinstance(other, Number) and self.value == other.value
+    
+    def modulo(self, other):
+        if not isinstance(other, Number):
+            return None, TypeError(f"Unsupported operand for %: 'Number' and {type(other).__name__}")
+        if other.value == 0:
+            return None, ZeroDivisionError("Modulo by zero")
+        return Number(self.value % other.value), None
 
     def __repr__(self):
         return str(self.value)
@@ -1992,6 +2038,8 @@ class Interpreter:
             result, error = left.multed_by(right)
         elif node.op_tok.type == TOKTYPE_DIV:
             result, error = left.dived_by(right)
+        elif node.op_tok.type == TOKTYPE_MOD:
+            result, error = left.modulo(right)
         elif node.op_tok.type == TOKTYPE_POWER:
             result, error = left.powed_by(right)
 
@@ -2015,8 +2063,10 @@ class Interpreter:
 
         else:
             return res.failure(RuntimeError(
-                node.op_tok.pos_start, node.op_tok.pos_end,
-                "Unknown binary operator"
+                node.op_tok.pos_start, 
+                node.op_tok.pos_end,
+                "Unknown binary operator",
+                context
             ))
 
         if error:
@@ -2421,6 +2471,7 @@ global_context.set("join", BuiltInFunction(execute_join))
 global_context.set("append", BuiltInFunction(execute_append))
 global_context.set("pop", BuiltInFunction(execute_pop))
 global_context.set("slice", BuiltInFunction(execute_slice))
+global_context.set("str", BuiltInFunction(execute_str))
 
 def run(fn, text, context=global_context):
     lexer = Lexer(fn, text)
