@@ -23,7 +23,7 @@ Stasiu is a dynamically-typed, interpreted programming language designed for sim
   - While loops (`while...then`)
 
 ### Operations
-- Arithmetic (`+`, `-`, `*`, `/`, `^`)
+- Arithmetic (`+`, `-`, `*`, `/`, `^`,`%` )
 - Comparison (`<`, `>`, `==`, `!=`, `<=`, `>=`)
 - Logical (`and`, `or`, `not`)
 - List indexing
@@ -100,7 +100,52 @@ add 4 to numbers
 remove 2 from numbers
 remove index 0 from numbers
 ```
+```stasiu
+# Length operations
+display: len("hello")             # 5
+display: len([1, 2, 3])           # 3
 
+# Max/min/sum
+numbers = [5, 2, 8, 1]
+display: max(numbers)             # 8
+display: min(numbers)             # 1
+display: sum(numbers)             # 16
+
+# List manipulation
+lst = [3, 1, 4, 2]
+display: reverse(lst)             # [2, 4, 1, 3]
+display: sort(lst)                # [1, 2, 3, 4]
+
+# Mixed types
+mixed = [5, 2.5, 3]
+display: sum(mixed)               # 10.5
+
+# String manipulation examples
+display: lower("Hello World!")          # "hello world!"
+display: upper("make this loud")        # "MAKE THIS LOUD"
+display: split("apple,banana,cherry", ",")  # ["apple", "banana", "cherry"]
+display: join(["2023", "12", "31"], "-")    # "2023-12-31"
+
+# List operation examples
+fruits = ["apple", "banana"]
+display: append(fruits, "orange")       # ["apple", "banana", "orange"]
+display: pop(fruits, 1)                 # "banana" (original list unchanged)
+display: slice(fruits, 0, 2)            # ["apple", "banana"]
+
+# Chaining operations
+numbers = [5, 2, 8, 1, 3]
+display: slice(sort(numbers), 1, 4)     # [2, 3, 5]
+display: join(split("a-b-c-d", "-"), ":")  # "a:b:c:d"
+
+# File path example
+path = join(split("home/user/documents", "/"), "\\")
+display: path  # "home\user\documents"
+
+# Error cases
+# display: max("hello")           # Error: must be list
+# display: sum([1, "two"])        # Error: numbers only
+# display: reverse(123)           # Error: must be list
+```
 ---
 
 ## Full Syntax Guide
