@@ -1,0 +1,13 @@
+secret = randint(1, 10)
+attempts = 3
+found = 0
+
+repeat attempts times:
+    ask: "Guess (1-10): " then save to guess
+    when guess == secret then:
+        display: "You won!"
+        found = 1
+        break
+
+when not found then:
+    display: "Lost! Number was " + secret
