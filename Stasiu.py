@@ -1,4 +1,6 @@
 from highlight_text_with_arrows import *
+import math
+import random
 
 #ERRORS
 
@@ -1349,6 +1351,421 @@ def execute_sqrt(exec_ctx):
     return res.success(Number(n.value**0.5))
 execute_sqrt.arg_names = ["n"]
 
+def execute_abs(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(abs(n.value)))
+execute_abs.arg_names = ["n"]
+
+def execute_sin(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(math.sin(n.value)))
+execute_sin.arg_names = ["n"]
+
+def execute_cos(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(math.cos(n.value)))
+execute_cos.arg_names = ["n"]
+
+def execute_tan(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(math.tan(n.value)))
+execute_tan.arg_names = ["n"]
+
+def execute_floor(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(math.floor(n.value)))
+execute_floor.arg_names = ["n"]
+
+def execute_ceil(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(math.ceil(n.value)))
+execute_ceil.arg_names = ["n"]
+
+def execute_round(exec_ctx):
+    res = RuntimeResult()
+    n = exec_ctx.symbol_table.get("n")
+    
+    if not isinstance(n, Number):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a number", exec_ctx
+        ))
+        
+    return res.success(Number(round(n.value)))
+execute_round.arg_names = ["n"]
+
+def execute_random(exec_ctx):
+    res = RuntimeResult()
+    return res.success(Number(random.random()))
+execute_random.arg_names = []
+
+def execute_randint(exec_ctx):
+    res = RuntimeResult()
+    a = exec_ctx.symbol_table.get("a")
+    b = exec_ctx.symbol_table.get("b")
+    
+    if not isinstance(a, Number) or not isinstance(b, Number):
+        return res.failure(RuntimeError(
+            a.pos_start if a else exec_ctx.parent_entry_pos,
+            b.pos_end if b else exec_ctx.parent_entry_pos,
+            "Both arguments must be numbers",
+            exec_ctx
+        ))
+        
+    if not (a.value.is_integer() and b.value.is_integer()):
+        return res.failure(RuntimeError(
+            a.pos_start if not a.value.is_integer() else b.pos_start,
+            b.pos_end,
+            "Arguments must be integers",
+            exec_ctx
+        ))
+        
+    a_int = int(a.value)
+    b_int = int(b.value)
+    
+    if a_int > b_int:
+        return res.failure(RuntimeError(
+            a.pos_start, b.pos_end,
+            "First argument must be less than or equal to second",
+            exec_ctx
+        ))
+        
+    value = random.randint(a_int, b_int)
+    return res.success(Number(value))
+execute_randint.arg_names = ["a", "b"]
+
+def execute_len(exec_ctx):
+    res = RuntimeResult()
+    collection = exec_ctx.symbol_table.get("collection")
+    
+    if isinstance(collection, List):
+        value = len(collection.elements)
+    elif isinstance(collection, String):
+        value = len(collection.value)
+    else:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be list or string", exec_ctx
+        ))
+        
+    return res.success(Number(value))
+execute_len.arg_names = ["collection"]
+
+def execute_max(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a list", exec_ctx
+        ))
+    
+    if not list_.elements:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "List cannot be empty", exec_ctx
+        ))
+
+    try:
+        values = [element.value for element in list_.elements if isinstance(element, Number)]
+        if len(values) != len(list_.elements):
+            raise TypeError()
+        max_value = max(values)
+    except TypeError:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "List must contain only numbers", exec_ctx
+        ))
+
+    return res.success(Number(max_value))
+execute_max.arg_names = ["list"]
+
+def execute_min(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a list", exec_ctx
+        ))
+    
+    if not list_.elements:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "List cannot be empty", exec_ctx
+        ))
+
+    try:
+        values = [element.value for element in list_.elements if isinstance(element, Number)]
+        if len(values) != len(list_.elements):
+            raise TypeError()
+        min_value = min(values)
+    except TypeError:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "List must contain only numbers", exec_ctx
+        ))
+
+    return res.success(Number(min_value))
+execute_min.arg_names = ["list"]
+
+def execute_sum(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a list", exec_ctx
+        ))
+
+    try:
+        total = 0
+        for element in list_.elements:
+            if not isinstance(element, Number):
+                raise TypeError()
+            total += element.value
+    except TypeError:
+        return res.failure(RuntimeError(
+            element.pos_start if element else exec_ctx.parent_entry_pos,
+            element.pos_end if element else exec_ctx.parent_entry_pos,
+            "List must contain only numbers", exec_ctx
+        ))
+
+    return res.success(Number(total))
+execute_sum.arg_names = ["list"]
+
+def execute_reverse(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a list", exec_ctx
+        ))
+
+    reversed_elements = list(reversed(list_.elements))
+    return res.success(List(reversed_elements))
+execute_reverse.arg_names = ["list"]
+
+def execute_sort(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a list", exec_ctx
+        ))
+
+    try:
+        sorted_elements = sorted(list_.elements, key=lambda x: x.value)
+    except TypeError as e:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            f"Sort error: {str(e)}", exec_ctx
+        ))
+
+    return res.success(List(sorted_elements))
+execute_sort.arg_names = ["list"]
+
+def execute_append(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    value = exec_ctx.symbol_table.get("value")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "First argument must be a list", exec_ctx
+        ))
+    
+    new_elements = list(list_.elements) + [value]
+    return res.success(List(new_elements))
+execute_append.arg_names = ["list", "value"]
+
+def execute_pop(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    index = exec_ctx.symbol_table.get("index")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "First argument must be a list", exec_ctx
+        ))
+    
+    if not isinstance(index, Number) or not index.value.is_integer():
+        return res.failure(RuntimeError(
+            index.pos_start if index else exec_ctx.parent_entry_pos,
+            index.pos_end if index else exec_ctx.parent_entry_pos,
+            "Index must be an integer", exec_ctx
+        ))
+    
+    idx = int(index.value)
+    if idx < 0 or idx >= len(list_.elements):
+        return res.failure(RuntimeError(
+            index.pos_start if index else exec_ctx.parent_entry_pos,
+            index.pos_end if index else exec_ctx.parent_entry_pos,
+            "Index out of range", exec_ctx
+        ))
+    
+    new_elements = list(list_.elements)
+    popped = new_elements.pop(idx)
+    return res.success(popped)
+execute_pop.arg_names = ["list", "index"]
+
+def execute_slice(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    start = exec_ctx.symbol_table.get("start")
+    end = exec_ctx.symbol_table.get("end")
+    
+    if not isinstance(list_, List):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "First argument must be a list", exec_ctx
+        ))
+    
+    if not isinstance(start, Number) or not start.value.is_integer():
+        return res.failure(RuntimeError(
+            start.pos_start if start else exec_ctx.parent_entry_pos,
+            start.pos_end if start else exec_ctx.parent_entry_pos,
+            "Start index must be an integer", exec_ctx
+        ))
+    
+    if not isinstance(end, Number) or not end.value.is_integer():
+        return res.failure(RuntimeError(
+            end.pos_start if end else exec_ctx.parent_entry_pos,
+            end.pos_end if end else exec_ctx.parent_entry_pos,
+            "End index must be an integer", exec_ctx
+        ))
+    
+    start_idx = max(0, min(int(start.value), len(list_.elements)))
+    end_idx = max(0, min(int(end.value), len(list_.elements)))
+    
+    return res.success(List(list_.elements[start_idx:end_idx]))
+execute_slice.arg_names = ["list", "start", "end"]
+
+def execute_lower(exec_ctx):
+    res = RuntimeResult()
+    string = exec_ctx.symbol_table.get("string")
+    
+    if not isinstance(string, String):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a string", exec_ctx
+        ))
+        
+    return res.success(String(string.value.lower()))
+execute_lower.arg_names = ["string"]
+
+def execute_upper(exec_ctx):
+    res = RuntimeResult()
+    string = exec_ctx.symbol_table.get("string")
+    
+    if not isinstance(string, String):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Argument must be a string", exec_ctx
+        ))
+        
+    return res.success(String(string.value.upper()))
+execute_upper.arg_names = ["string"]
+
+def execute_split(exec_ctx):
+    res = RuntimeResult()
+    string = exec_ctx.symbol_table.get("string")
+    delimiter = exec_ctx.symbol_table.get("delimiter")
+    
+    if not isinstance(string, String) or not isinstance(delimiter, String):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "Both arguments must be strings", exec_ctx
+        ))
+    
+    parts = string.value.split(delimiter.value)
+    elements = [String(part) for part in parts]
+    return res.success(List(elements))
+execute_split.arg_names = ["string", "delimiter"]
+
+def execute_join(exec_ctx):
+    res = RuntimeResult()
+    list_ = exec_ctx.symbol_table.get("list")
+    separator = exec_ctx.symbol_table.get("separator")
+    
+    if not isinstance(list_, List) or not isinstance(separator, String):
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "First argument must be a list and second must be a string", exec_ctx
+        ))
+    
+    try:
+        string_elements = [element.value for element in list_.elements 
+                          if isinstance(element, String)]
+        if len(string_elements) != len(list_.elements):
+            raise TypeError()
+    except TypeError:
+        return res.failure(RuntimeError(
+            exec_ctx.parent_entry_pos, exec_ctx.parent_entry_pos,
+            "All list elements must be strings", exec_ctx
+        ))
+    
+    joined = separator.value.join(string_elements)
+    return res.success(String(joined))
+execute_join.arg_names = ["list", "separator"]
+
 def execute_run(exec_ctx):
     res = RuntimeResult()
     fn = exec_ctx.symbol_table.get("fn")
@@ -1982,6 +2399,28 @@ class Interpreter:
 global_context = Context('<program>')
 global_context.set("sqrt", BuiltInFunction(execute_sqrt))
 global_context.set("run", BuiltInFunction(execute_run))
+global_context.set("abs", BuiltInFunction(execute_abs))
+global_context.set("sin", BuiltInFunction(execute_sin))
+global_context.set("cos", BuiltInFunction(execute_cos))
+global_context.set("tan", BuiltInFunction(execute_tan))
+global_context.set("floor", BuiltInFunction(execute_floor))
+global_context.set("ceil", BuiltInFunction(execute_ceil))
+global_context.set("round", BuiltInFunction(execute_round))
+global_context.set("random", BuiltInFunction(execute_random))
+global_context.set("randint", BuiltInFunction(execute_randint))
+global_context.set("len", BuiltInFunction(execute_len))
+global_context.set("max", BuiltInFunction(execute_max))
+global_context.set("min", BuiltInFunction(execute_min))
+global_context.set("sum", BuiltInFunction(execute_sum))
+global_context.set("reverse", BuiltInFunction(execute_reverse))
+global_context.set("sort", BuiltInFunction(execute_sort))
+global_context.set("lower", BuiltInFunction(execute_lower))
+global_context.set("upper", BuiltInFunction(execute_upper))
+global_context.set("split", BuiltInFunction(execute_split))
+global_context.set("join", BuiltInFunction(execute_join))
+global_context.set("append", BuiltInFunction(execute_append))
+global_context.set("pop", BuiltInFunction(execute_pop))
+global_context.set("slice", BuiltInFunction(execute_slice))
 
 def run(fn, text, context=global_context):
     lexer = Lexer(fn, text)

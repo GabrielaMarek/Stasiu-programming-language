@@ -1,2 +1,43 @@
-x = 2 + 2 + sqrt(25)
-display: x
+# Square root
+display: sqrt(25)          # 5
+display: sqrt(2.25)        # 1.5
+
+# Absolute value
+display: abs(-10)          # 10
+display: abs(3.14)         # 3.14
+
+# Trigonometric functions (using approximate π values)
+display: sin(3.14159/2)    # ~1 (π/2 radians)
+display: cos(3.14159)      # ~-1 (π radians)
+display: tan(0.785398)     # ~1 (π/4 radians)
+
+# Rounding functions
+display: floor(3.7)        # 3
+display: ceil(3.2)         # 4
+display: round(3.5)        # 4
+display: floor(-2.3)       # -3
+
+# Random numbers
+display: random()          # Random float between 0-1 (e.g. 0.548813)
+display: randint(1, 10)    # Random integer 1-10 (e.g. 7)
+
+# Combined example
+angle = 1.0472  # ~60 degrees in radians
+display: sin(angle)      # ~0.866
+display: cos(angle)      # ~0.5
+display: tan(angle)      # ~1.732
+
+# Math operations with functions
+x = -4.8
+display: abs(x)          # 4.8
+display: floor(x)        # -5
+display: ceil(x)         # -4
+display: round(x)        # -5
+
+# Random number generation
+dice_roll = randint(1, 6)
+display: dice_roll       # Random number 1-6
+
+# Error case examples (would throw errors)
+# display: sqrt("hello")  # Error: Argument must be number
+# display: randint(2.5, 5) # Error: Arguments must be integers
