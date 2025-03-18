@@ -1842,6 +1842,11 @@ class RuntimeResult:
     def __init__(self):
         self.value = None
         self.error = None
+        self.loop_control = None
+
+    def success_break(self):
+            self.loop_control = 'break'
+            return self
 
     def register(self, res):
         if res.error: self.error = res.error
@@ -2249,9 +2254,12 @@ class Interpreter:
             ))
 
         for _ in range(times):
-            res.register(self.visit(node.body, context))
+            body_result = self.visit(node.body, context)
+            res.register(body_result)
             if res.error:
                 return res
+            if body_result.loop_control == 'break':
+                break
 
         return res.success(None)
     
@@ -2443,6 +2451,9 @@ class Interpreter:
             res.register(self.visit(stmt, context))
             if res.error: return res
         return res.success(None)
+    
+    def visit_BreakNode(self, node, context):
+        return RuntimeResult().success_break()
 
 #RUN
 
