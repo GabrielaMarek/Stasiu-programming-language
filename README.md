@@ -1,5 +1,5 @@
 # Stasiu Programming Language
-The code is executable in most cases, you must create a file named "example.stas" (or whatever you want) and run the shell.py. In the terminal run your file:
+The code is executable, run the shell.py. In the terminal run your file:
 ```stasiu
 run("example1.stas")
 ```
