@@ -25,7 +25,7 @@ class Error:
 
 class WrongSyntaxError(Error):
 	def __init__(self, pos_start, pos_end, details=''):
-			super().__init__(pos_start, pos_end, 'Oh no... Invalid Syntax...', details)
+			super().__init__(pos_start, pos_end, 'Oh no... Invalid Syntax... The code does not make sense. Check the spelling and symbols!', details)
 
 class CharacterFormatError(Error):
     def __init__(self, pos_start, pos_end, details):
@@ -33,7 +33,7 @@ class CharacterFormatError(Error):
 
 class RuntimeError(Error):
     def __init__(self, pos_start, pos_end, details, context):
-        super().__init__(pos_start, pos_end, 'Runtime Error', details)
+        super().__init__(pos_start, pos_end, 'The code started running, but tripped over something!', details)
         self.context = context
 
     def as_string(self):
@@ -51,12 +51,12 @@ class RuntimeError(Error):
             if pos is not None:
                 file_info = f'File {pos.filename}, line {pos.ln + 1}'
             else:
-                file_info = 'File unknown, line unknown'
+                file_info = 'I do not know which file or line the mistake is in. It is a sneaky one!'
             result = f'  {file_info}, in {ctx.display_name}\n' + result
             pos = ctx.parent_entry_pos
             ctx = ctx.parent
 
-        return 'Traceback (most recent call last):\n' + result
+        return 'Walking back through the code to find where the mistake began.:\n' + result
 
 #POSITION
 
@@ -273,7 +273,7 @@ class Lexer:
             self.next_character()
 
         if self.character_current != '"':  
-            return [], CharacterFormatError(pos_start, self.pos, "Unterminated string")
+            return [], CharacterFormatError(pos_start, self.pos, "You started a sentence with quotes but forgot to finish it!")
         self.next_character() 
         return Token(TOKTYPE_STRING, string_value, pos_start, self.pos.copy())
 
@@ -396,7 +396,7 @@ class Lexer:
                             break
                         self.next_character()
                     if not comment_closed:
-                        return [], CharacterFormatError(pos_start, self.pos, "Unclosed multi-line comment")
+                        return [], CharacterFormatError(pos_start, self.pos, "You started a big comment but forgot to close it.")
                 else:  
                     pos_start = self.pos.copy()
                     self.next_character()
@@ -423,7 +423,6 @@ class Lexer:
             tokens.append(Token(TOKTYPE_DEDENT))
             self.indent_stack.pop()
 
-        print(f"Lexer Tokens: {tokens}")
         return tokens, None
 
 
@@ -687,8 +686,6 @@ class Parser:
         self.token_current = None
         self.prev_token = None 
         self.next_character()
-        print("Final Lexer Tokens:", tokens)
-        print(f"Initializing parser with tokens: {self.tokens}")
 
     def next_character(self):
         self.prev_token = self.token_current
@@ -697,7 +694,6 @@ class Parser:
             self.token_current = self.tokens[self.tok_idx]
         else:
             self.token_current = None
-        print(f"next_character: Current token is now {self.token_current}")
         return self.token_current
 
     def peek(self):
@@ -842,7 +838,7 @@ class Parser:
                 pos_end = pos_start
             return res.failure(WrongSyntaxError(
                 pos_start, pos_end,
-                "Unexpected end of input, expected a number, string, or identifier"
+                "The code ended too soon! I was waiting for a word, number, or name."
             ))
 
         if tok.type == TOKTYPE_NUMBER:
@@ -873,7 +869,7 @@ class Parser:
                     if self.token_current.type != TOKTYPE_RPAREN:
                         return res.failure(WrongSyntaxError(
                             self.token_current.pos_start, self.token_current.pos_end,
-                            "Expected ')' after arguments"
+                            "You opened a bracket '(', but forgot to close it with a ')"
                         ))
                     closing_paren_pos = self.token_current.pos_end
                     res.register(self.next_character())
@@ -885,7 +881,7 @@ class Parser:
                 if not self.token_current:
                     return res.failure(WrongSyntaxError(
                         var_name_tok.pos_start, var_name_tok.pos_end,
-                        "Unexpected end of input after '['"
+                        "You opened a box '[', but didn’t put everything inside yet."
                     ))
 
                 index_expr = res.register(self.expr())  
@@ -896,7 +892,7 @@ class Parser:
                     return res.failure(WrongSyntaxError(
                         self.token_current.pos_start if self.token_current else var_name_tok.pos_start,
                         self.token_current.pos_end if self.token_current else var_name_tok.pos_end,
-                        "Expected ']' after subscript index"
+                        "You need a ']' to close the box you opened."
                     ))
 
                 closing_bracket = self.token_current  
@@ -905,7 +901,7 @@ class Parser:
                 if closing_bracket is None:
                     return res.failure(WrongSyntaxError(
                         var_name_tok.pos_start, index_expr.pos_end,
-                        "Unexpected end of input after subscript"
+                        "The code stopped too soon after '['. Something’s missing."
                     ))
 
                 return res.success(NodeSubscript(var_name_tok, index_expr, var_name_tok.pos_start, closing_bracket.pos_end))
@@ -958,7 +954,7 @@ class Parser:
             
         return res.failure(WrongSyntaxError(
                         tok.pos_start, tok.pos_end,
-                        f"Unexpected token: '{tok.value}'"
+                        f"Found something strange: '{tok.value}'. Maybe it’s a typo?"
                     ))
             
     def block(self):
@@ -972,7 +968,7 @@ class Parser:
             return res.failure(WrongSyntaxError(
                 self.token_current.pos_start if self.token_current else None,
                 self.token_current.pos_end if self.token_current else None,
-                "Expected indented block after colon"
+                "After ':' you need to indent (add spaces) and write what happens next."
             ))
         res.register(self.next_character())  
 
@@ -1332,7 +1328,6 @@ class Parser:
 
         while self.token_current is not None and self.token_current.type in ops:
             op_tok = self.token_current
-            print(f"bin_op: Found operator '{op_tok.type}'")
             res.register(self.next_character())
             right = res.register(func_b())
             if res.error:
@@ -1887,7 +1882,6 @@ class Number:
             return Number(self.value - other.value, self.pos_start, other.pos_end, self.context), None
         elif op == "mul":
             return Number(self.value * other.value, self.pos_start, other.pos_end, self.context), None
-            print(f"Token generated: {tokens[-1]}")
         elif op == "div":
             if other.value == 0:
                 return None, RuntimeError(
